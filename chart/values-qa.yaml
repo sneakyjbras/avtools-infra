@@ -1,0 +1,19 @@
+# QA overlay — namespace avtools-qa. QA accounts + QA PyPI image tag.
+environment: qa
+
+image:
+  tag: qa
+
+eam:
+  username: avqa
+landb:
+  clientId: av-tools-qa
+
+# QA can run a touch hotter while ramp-testing toward */1.
+jobs:
+  snmp-timeseries:
+    schedule: "*/2 * * * *"
+  run-eam:
+    schedule: "*/2 * * * *"
+  run-landb:
+    schedule: "*/2 * * * *"

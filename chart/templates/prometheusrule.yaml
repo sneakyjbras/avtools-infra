@@ -1,0 +1,32 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "avtools.fullname" . }}-freshness
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+    role: alert-rules
+spec:
+  groups:
+    - name: avtools.freshness
+      rules:
+        {{- range $name, $job := .Values.jobs }}
+        {{- if $job.enabled }}
+        - alert: AvtoolsCronStale-{{ $name }}
+          # No successful completion within the freshness window → converge failed.
+          expr: |
+            time() - max(kube_job_status_completion_time
+              * on(job_name) group_left() (kube_job_status_succeeded == 1)
+              and on(job_name) label_replace(vector(1), "job_name", "$1", "job_name",
+                "{{ include "avtools.fullname" $ }}-{{ $name }}.*"))
+              > {{ mul $.Values.prometheusRule.freshnessMinutes 60 }}
+          for: 2m
+          labels:
+            severity: warning
+            environment: {{ $.Values.environment }}
+            component: {{ $name }}
+          annotations:
+            summary: "avtools {{ $name }} ({{ $.Values.environment }}) has not succeeded in {{ $.Values.prometheusRule.freshnessMinutes }}m"
+            description: "The sweep converges on the next cycle; investigate if this persists."
+        {{- end }}
+        {{- end }}
+{{- end }}

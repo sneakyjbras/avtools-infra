@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "avtools.fullname" . }}-config
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+data:
+  # MONIT / OTLP metrics (push-based; not scraped)
+  MONIT_TENANT: {{ .Values.config.MONIT_TENANT | quote }}
+  MONIT_OTLP_ENDPOINT: {{ .Values.config.MONIT_OTLP_ENDPOINT | quote }}
+  MONIT_OTLP_INSECURE: {{ .Values.config.MONIT_OTLP_INSECURE | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.config.OTEL_SERVICE_NAME | quote }}
+  # Deployment labels (Grafana distinguishes qa/prod by these)
+  AVTOOLS_ENVIRONMENT: {{ .Values.environment | quote }}
+  AVTOOLS_HOSTGROUP: {{ .Values.hostgroup | quote }}
+  AVTOOLS_AVAILABILITY_ZONE: {{ .Values.availabilityZone | quote }}
+  # Non-secret credential halves (secret halves live in the Secret)
+  MY_USERNAME: {{ .Values.eam.username | quote }}
+  LANDB_CLIENT_ID: {{ .Values.landb.clientId | quote }}
+  LANDB_AUDIENCE: {{ .Values.landb.audience | quote }}
+  # Structured log file the container writes (also echoed to stdout)
+  AVTOOLS_LOG_FILE: "/tmp/avtools/avtools.jsonl"
+  # Sentry (non-secret bits; DSN comes from the Secret)
+  SENTRY_ENVIRONMENT: {{ .Values.environment | quote }}
+  SENTRY_TRACES_SAMPLE_RATE: {{ .Values.sentry.tracesSampleRate | quote }}
+  SENTRY_RELEASE: {{ printf "avtools@%s" (.Values.image.tag | toString) | quote }}

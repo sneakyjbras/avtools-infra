@@ -1,0 +1,19 @@
+# PROD overlay — namespace avtools-prod. PROD accounts + PROD PyPI image tag.
+environment: prod
+
+image:
+  tag: prod
+
+eam:
+  username: avtools
+landb:
+  clientId: av-tools
+
+# Start PROD conservatively at */2; raise only after QA proves the device/DB load.
+jobs:
+  snmp-timeseries:
+    schedule: "*/2 * * * *"
+  run-eam:
+    schedule: "*/2 * * * *"
+  run-landb:
+    schedule: "*/2 * * * *"

@@ -1,0 +1,13 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+crash.log
+
+# Filled-in Kubernetes secret (use secrets/secret.example.yaml as the template)
+secrets/secret.yaml
+**/secret.yaml
+
+# Helm
+*.tgz

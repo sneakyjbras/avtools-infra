@@ -1,0 +1,122 @@
+# Default (base) values. Environment overlays: values-qa.yaml / values-prod.yaml.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# avtools_environment / submitter_environment label. Overridden per env.
+environment: qa
+availabilityZone: cern-geneva-b
+hostgroup: itdcim/avtools
+
+image:
+  repository: registry.cern.ch/itdcim/avtools
+  # Moving env tag (qa|prod) so ArgoCD need not commit per-SHA image bumps.
+  tag: qa
+  pullPolicy: Always
+
+# Pull secret for the private Harbor project (created out-of-band; see README).
+imagePullSecrets:
+  - name: harbor-avtools
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Native K8s Secret populated by the tbag bridge (scripts/sync-secret.sh).
+# The chart NEVER templates secret values — it only references this name.
+secretName: avtools-secrets # pragma: allowlist secret
+
+# Non-secret config → ConfigMap (envFrom on every job). The *_username / client_id
+# halves are non-secret (they live in Puppet hiera, not teigi); the passwords are
+# the teigi keys pulled into the Secret.
+config:
+  MONIT_TENANT: avtools
+  MONIT_OTLP_ENDPOINT: monit-otlp.cern.ch:4316
+  MONIT_OTLP_INSECURE: "true"
+  OTEL_SERVICE_NAME: avtools
+
+eam:
+  username: avqa
+landb:
+  clientId: av-tools-qa
+  audience: production-microservice-landb-rest
+
+# Sentry: disabled until IT-PW issues a DSN; the DSN is stored in the Secret
+# (key SENTRY_DSN) and only injected when enabled.
+sentry:
+  enabled: false
+  tracesSampleRate: "0.0"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# The three batch services. shards == completions == parallelism == SHARD_TOTAL.
+# Sharding is crc32(equipment_no) % SHARD_TOTAL == JOB_COMPLETION_INDEX.
+# ---------------------------------------------------------------------------
+jobs:
+  snmp-timeseries:
+    enabled: true
+    schedule: "*/2 * * * *"
+    shards: 8
+    threads: 16
+    command: ["avtools", "--logs", "snmp-timeseries"]
+    activeDeadlineSeconds: 100
+    backoffLimit: 1
+    netRaw: true # ICMP ping needs CAP_NET_RAW
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
+  run-eam:
+    enabled: true
+    schedule: "*/2 * * * *"
+    shards: 4
+    threads: 16
+    command: ["avtools", "--logs", "run-eam"]
+    activeDeadlineSeconds: 100
+    backoffLimit: 1
+    netRaw: false
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "MY_PASSWORD"]
+  run-landb:
+    enabled: true
+    schedule: "*/2 * * * *"
+    shards: 1
+    threads: 8
+    command: ["avtools", "--logs", "run-landb"]
+    activeDeadlineSeconds: 60
+    backoffLimit: 1
+    netRaw: false
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "LANDB_CLIENT_SECRET"]
+
+# ---------------------------------------------------------------------------
+# Recovery watchdog (AP layer 4): alert when a CronJob hasn't succeeded within
+# freshnessMinutes. Requires the Prometheus Operator CRD (kube-prometheus-stack).
+# ---------------------------------------------------------------------------
+prometheusRule:
+  enabled: false
+  freshnessMinutes: 10
+
+# ---------------------------------------------------------------------------
+# Fluent Bit log shipper → CERN MonIT OpenSearch (otel-logs_avtools).
+# Default OFF: the MonIT logs tenant/index is not provisioned yet
+# (see AVTOOLS-OPENSEARCH.md). Flip on once SNOW confirms the endpoint/mapping.
+# ---------------------------------------------------------------------------
+fluentBit:
+  enabled: false
+  image: cr.fluentbit.io/fluent/fluent-bit:3.1.9
+  # OTLP/HTTP logs receiver (different port+protocol from the metrics :4316 gRPC).
+  logsEndpointHost: monit-otlp.cern.ch
+  logsEndpointPort: "4319"
+  logsUri: /v1/logs
+  tenant: avtools
+  # Password comes from the Secret (key AVTOOLS_LOGS_PWD), never templated here.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

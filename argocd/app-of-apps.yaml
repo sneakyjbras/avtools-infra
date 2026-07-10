@@ -1,0 +1,25 @@
+# Root "app of apps": point ArgoCD at argocd and it reconciles the
+# AppProject, the ApplicationSet (qa+prod), and the kube-prometheus-stack app.
+#
+#   kubectl apply -n argocd -f argocd/app-of-apps.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: avtools-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.cern.ch/itdcim/av-tools-infra.git
+    targetRevision: master
+    path: argocd
+    directory:
+      recurse: false
+      exclude: app-of-apps.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

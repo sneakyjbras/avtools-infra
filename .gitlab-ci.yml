@@ -1,0 +1,94 @@
+# CI for the GitOps/infra repo: validate Terraform + Helm; ArgoCD does the deploy.
+# master mirrors QA; terraform apply is manual on master.
+#
+# GitLab SAST + Secret Detection (enabled via the project UI) are preserved below.
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+stages:
+  - validate
+  - test # SAST
+  - secret-detection
+  - plan
+  - deploy
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  TF_STATE_NAME: avtools
+  SECRET_DETECTION_ENABLED: "true"
+
+# Pin the GitLab security scanners to their stages (from the project's template).
+sast:
+  stage: test
+
+secret_detection:
+  stage: secret-detection
+
+# ---------------------------------------------------------------------------
+# Terraform (GitLab-managed state via the gitlab-terraform wrapper)
+# ---------------------------------------------------------------------------
+.tf:
+  image:
+    name: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+    entrypoint: [""]
+  cache:
+    key: "tf-${TF_STATE_NAME}"
+    paths:
+      - ${TF_ROOT}/.terraform
+
+tf_fmt_validate:
+  extends: .tf
+  stage: validate
+  script:
+    - cd "$TF_ROOT"
+    - terraform fmt -check -recursive
+    - terraform init -backend=false
+    - terraform validate
+
+tf_plan:
+  extends: .tf
+  stage: plan
+  script:
+    - gitlab-terraform plan
+    - gitlab-terraform plan-json
+  artifacts:
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+tf_apply:
+  extends: .tf
+  stage: deploy
+  # Serialize applies; manual gate on master only.
+  resource_group: ${TF_STATE_NAME}
+  script:
+    - gitlab-terraform apply
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: manual
+
+# ---------------------------------------------------------------------------
+# Helm chart: lint + render + schema-validate every manifest (both envs)
+# ---------------------------------------------------------------------------
+helm_validate:
+  stage: validate
+  image:
+    name: alpine/helm:3.16.2
+    entrypoint: [""]
+  before_script:
+    - apk add --no-cache curl tar
+    - curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+  script:
+    - helm lint chart -f chart/values.yaml -f chart/values-qa.yaml
+    - >
+      helm template avtools chart -n avtools-qa
+      -f chart/values.yaml -f chart/values-qa.yaml
+      | kubeconform -strict -ignore-missing-schemas -summary
+    - >
+      helm template avtools chart -n avtools-prod
+      -f chart/values.yaml -f chart/values-prod.yaml
+      --set fluentBit.enabled=true --set prometheusRule.enabled=true
+      | kubeconform -strict -ignore-missing-schemas -summary

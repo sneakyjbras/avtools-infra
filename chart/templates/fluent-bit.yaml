@@ -1,0 +1,132 @@
+{{- if .Values.fluentBit.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "avtools.fullname" . }}-fluent-bit
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fluent-bit
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "avtools.fullname" . }}-fluent-bit
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "avtools.fullname" . }}-fluent-bit
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fluent-bit
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        5
+        Daemon       Off
+        Log_Level    info
+        Parsers_File parsers.conf
+
+    [INPUT]
+        Name              tail
+        # Only this namespace's avtools pods (both envs run in separate namespaces).
+        Path              /var/log/containers/*_{{ .Release.Namespace }}_*.log
+        multiline.parser  cri
+        Tag               kube.*
+        Mem_Buf_Limit     10MB
+        Skip_Long_Lines   On
+
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Merge_Log           On
+        Keep_Log            Off
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude On
+
+    [FILTER]
+        # Distinguish k8s stream from the monolith during the migration overlap.
+        Name    modify
+        Match   kube.*
+        Add     source k8s
+        Add     submitter_environment {{ .Values.environment }}
+
+    [OUTPUT]
+        Name          opentelemetry
+        Match         kube.*
+        Host          {{ .Values.fluentBit.logsEndpointHost }}
+        Port          {{ .Values.fluentBit.logsEndpointPort }}
+        Logs_uri      {{ .Values.fluentBit.logsUri }}
+        Tls           On
+        Tls.verify    On
+        # TODO(verify): confirm the MonIT OTLP/logs auth scheme + attribute mapping
+        # (SNOW to MonIT, see AVTOOLS-OPENSEARCH.md §6). tenant header + basic auth
+        # from the bridged AVTOOLS_LOGS_PWD is the working assumption.
+        Header        tenant_id {{ .Values.fluentBit.tenant }}
+        http_user     {{ .Values.fluentBit.tenant }}
+        http_passwd   ${AVTOOLS_LOGS_PWD}
+  parsers.conf: |
+    [PARSER]
+        Name   cri
+        Format regex
+        Regex  ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<message>.*)$
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "avtools.fullname" . }}-fluent-bit
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fluent-bit
+spec:
+  selector:
+    matchLabels: {{- include "avtools.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: fluent-bit
+  template:
+    metadata:
+      labels: {{- include "avtools.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fluent-bit
+    spec:
+      serviceAccountName: {{ include "avtools.fullname" . }}-fluent-bit
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: fluent-bit
+          image: {{ .Values.fluentBit.image }}
+          env:
+            - name: AVTOOLS_LOGS_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: AVTOOLS_LOGS_PWD
+          resources: {{- toYaml .Values.fluentBit.resources | nindent 12 }}
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: config
+              mountPath: /fluent-bit/etc/
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: config
+          configMap:
+            name: {{ include "avtools.fullname" . }}-fluent-bit
+{{- end }}

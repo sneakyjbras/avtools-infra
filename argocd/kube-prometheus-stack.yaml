@@ -1,0 +1,40 @@
+# In-cluster Prometheus for CLUSTER/POD/NODE health only. App metrics keep
+# pushing OTLP → MONIT (Mimir→Grafana); do not duplicate them here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: avtools
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.1.1
+    helm:
+      values: |
+        prometheus:
+          prometheusSpec:
+            # Tag every series so QA and PROD are distinguishable in Grafana.
+            externalLabels:
+              cluster: avtools-k8s
+            retention: 15d
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+        # Grafana here is only for cluster health; app dashboards live in MONIT Grafana.
+        grafana:
+          enabled: false
+        alertmanager:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

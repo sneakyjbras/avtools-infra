@@ -1,0 +1,19 @@
+AV Tools deployed to namespace {{ .Release.Namespace }} (environment: {{ .Values.environment }}).
+
+CronJobs:
+{{- range $name, $job := .Values.jobs }}
+{{- if $job.enabled }}
+  - {{ include "avtools.fullname" $ }}-{{ $name }}  schedule={{ $job.schedule }}  shards={{ $job.shards }}  threads={{ $job.threads }}
+{{- end }}
+{{- end }}
+
+Before the jobs can run, the secret must exist (it is NOT part of this chart):
+  ./scripts/sync-secret.sh        # tbag -> secret/{{ .Values.secretName }}
+
+Trigger one run now:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "avtools.fullname" . }}-snmp-timeseries manual
+  kubectl -n {{ .Release.Namespace }} get pods -w
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=snmp-timeseries --tail=50
+
+Fluent Bit log shipping is {{ if .Values.fluentBit.enabled }}ENABLED{{ else }}disabled (MonIT logs tenant not provisioned yet){{ end }}.
+Sentry is {{ if .Values.sentry.enabled }}ENABLED{{ else }}disabled (set sentry.enabled + SENTRY_DSN in the secret){{ end }}.

@@ -1,0 +1,87 @@
+{{- range $name, $job := .Values.jobs }}
+{{- if $job.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "avtools.fullname" $ }}-{{ $name }}
+  labels: {{- include "avtools.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  schedule: {{ $job.schedule | quote }}
+  # AP model: never overlap; a missed tick converges on the next cycle.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      completions: {{ $job.shards }}
+      parallelism: {{ $job.shards }}
+      completionMode: Indexed
+      backoffLimit: {{ $job.backoffLimit | default 1 }}
+      activeDeadlineSeconds: {{ $job.activeDeadlineSeconds | default 100 }}
+      template:
+        metadata:
+          labels: {{- include "avtools.selectorLabels" $ | nindent 12 }}
+            app.kubernetes.io/component: {{ $name }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "avtools.serviceAccountName" $ }}
+          automountServiceAccountToken: false
+          {{- with $.Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: {{ $name }}
+              image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              command: {{ toJson $job.command }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "avtools.fullname" $ }}-config
+              env:
+                # completions must equal SHARD_TOTAL; JOB_COMPLETION_INDEX is
+                # auto-injected by the Indexed Job and read as --shard-index.
+                - name: SHARD_TOTAL
+                  value: {{ $job.shards | quote }}
+                - name: THREADS
+                  value: {{ $job.threads | quote }}
+                {{- range $job.secretKeys }}
+                - name: {{ . }}
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $.Values.secretName }}
+                      key: {{ . }}
+                {{- end }}
+                {{- if $.Values.sentry.enabled }}
+                - name: SENTRY_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $.Values.secretName }}
+                      key: SENTRY_DSN
+                {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+                  {{- if $job.netRaw }}
+                  add: ["NET_RAW"]
+                  {{- end }}
+              volumeMounts:
+                - name: logdir
+                  mountPath: /tmp/avtools
+              resources: {{- toYaml $.Values.resources | nindent 16 }}
+          volumes:
+            - name: logdir
+              emptyDir: {}
+{{- end }}
+{{- end }}

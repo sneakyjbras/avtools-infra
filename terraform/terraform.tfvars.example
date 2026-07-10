@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and adjust. No secrets belong here — OpenStack auth
+# comes from application-credential env vars / clouds.yaml.
+
+cluster_name     = "avtools-k8s"
+cluster_template = "kubernetes-1.33.3-1"
+keypair          = "my-openstack-keypair"
+
+# 1 master + 3 workers = 4 of the 10-instance avtools project quota.
+master_count = 1
+node_count   = 3
+
+# cluster-autoscaler bounds (leave headroom under the 10-instance quota).
+autoscale_min = 3
+autoscale_max = 6
+
+# Uncomment to override the template flavors:
+# flavor        = "m2.medium"
+# master_flavor = "m2.medium"

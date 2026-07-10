@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: avtools
+  namespace: argocd
+spec:
+  description: AV Tools sharded sweep (QA + PROD).
+  sourceRepos:
+    - https://gitlab.cern.ch/itdcim/av-tools-infra.git
+    - https://prometheus-community.github.io/helm-charts
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: avtools-qa
+    - server: https://kubernetes.default.svc
+      namespace: avtools-prod
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

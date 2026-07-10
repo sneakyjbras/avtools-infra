@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: avtools
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    # One entry per environment. master mirrors QA → QA tracks `master`;
+    # PROD is promoted by fast-forwarding the `prod` branch to a release tag.
+    - list:
+        elements:
+          - env: qa
+            namespace: avtools-qa
+            targetRevision: master
+          - env: prod
+            namespace: avtools-prod
+            targetRevision: prod
+  template:
+    metadata:
+      name: 'avtools-{{.env}}'
+    spec:
+      project: avtools
+      source:
+        repoURL: https://gitlab.cern.ch/itdcim/av-tools-infra.git
+        targetRevision: '{{.targetRevision}}'
+        path: chart
+        helm:
+          valueFiles:
+            - values.yaml
+            - 'values-{{.env}}.yaml'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          # The tbag-bridged Secret is created out-of-band; the chart never renders
+          # it, so ArgoCD never manages or prunes it.
+          - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 15s
+            maxDuration: 3m
+            factor: 2
