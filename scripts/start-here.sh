@@ -88,13 +88,16 @@ ok "scripts/env.sh"
 
 : "${CERN_USER:?set CERN_USER in scripts/env.sh}"
 : "${PROJECT_ID:?set PROJECT_ID in scripts/env.sh}"
-[ -n "${GITLAB_ACCESS_TOKEN:-}" ] || stop \
-  "GITLAB_ACCESS_TOKEN is empty in scripts/env.sh." \
-  "" \
-  "gitlab.cern.ch -> avatar -> Preferences -> Access Tokens -> scope: api" \
-  "" \
-  "Terraform state lives in GitLab, so this is needed even to plan."
-ok "cern user (${CERN_USER}), gitlab token, project id (${PROJECT_ID})"
+ok "cern user (${CERN_USER}), project id (${PROJECT_ID})"
+
+# The GitLab token is ONLY needed to reach Terraform state (step 8). Everything
+# up to and including the cluster status check needs Kerberos alone — so don't
+# block a status check on it. Warn now, hard-fail later, at the point of use.
+if [ -n "${GITLAB_ACCESS_TOKEN:-}" ]; then
+  ok "gitlab token"
+else
+  info "no GITLAB_ACCESS_TOKEN — checks still run; only terraform init/plan needs it"
+fi
 
 # ============================================================================
 # 3. OPENSTACK  (Kerberos — NOT an application credential)
@@ -237,7 +240,12 @@ if [ -n "$status" ]; then
       echo
       exit 0 ;;
     CREATE_IN_PROGRESS|UPDATE_IN_PROGRESS)
-      info "Magnum takes 10-20 min and prints nothing while it works."
+      # All four VMs go ACTIVE around 20 min while the cluster is still building:
+      # Heat is then waiting on ignition, the kubelet bootstrap, and the
+      # cern_chart addon install (45m budget in the template alone). Running VMs
+      # are NOT a sign it is nearly done, and they are not a sign it is stuck.
+      info "Normal. Budget 45-60 min — running VMs do not mean it's nearly done."
+      info "Nothing to do; Magnum builds server-side whether or not you watch."
       info "Re-run this script to check again."
       exit 0 ;;
     CREATE_FAILED)
@@ -278,6 +286,15 @@ fi
 # 8. INIT + PLAN
 # ============================================================================
 step "8. Terraform init + plan"
+
+# Now it's actually needed.
+[ -n "${GITLAB_ACCESS_TOKEN:-}" ] || stop \
+  "GITLAB_ACCESS_TOKEN is empty in scripts/env.sh." \
+  "" \
+  "gitlab.cern.ch -> avatar -> Preferences -> Access Tokens -> scope: api" \
+  "" \
+  "Terraform state lives in GitLab, so init/plan cannot run without it." \
+  "(Everything above this point works fine without it.)"
 
 STATE_URL="https://gitlab.cern.ch/api/v4/projects/${PROJECT_ID}/terraform/state/avtools"
 cd "$TF_DIR"
