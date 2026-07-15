@@ -23,8 +23,18 @@ variable "cluster_template" {
 }
 
 variable "keypair" {
-  description = "Name of an existing OpenStack keypair for node SSH access."
+  description = <<-EOT
+    Name of an existing OpenStack keypair for node SSH access. Terraform
+    references it BY NAME, so it must already exist in the project before apply
+    (`scripts/start-here.sh` creates it if missing).
+
+    Defaulted because terraform.tfvars is gitignored: CI has no tfvars, so any
+    variable without a default breaks `terraform plan` in the pipeline. The name
+    is not a secret. Keypairs belong to your USER, not the project — whoever
+    applies must hold the matching private key or they cannot SSH to the nodes.
+  EOT
   type        = string
+  default     = "avtools-k8s"
 }
 
 variable "node_count" {
