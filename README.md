@@ -2,17 +2,24 @@
 
 GitOps + infrastructure for **AV Tools** on CERN **Kubernetes-on-OpenStack (Magnum)**.
 
+### → New here? [**START-HERE.md**](START-HERE.md), then `./scripts/start-here.sh`
+
 Application code lives in [`itdcim/av-tools`](https://gitlab.cern.ch/itdcim/av-tools);
 this repo only **deploys** the container image that av-tools builds and publishes to
 `registry.cern.ch`. The contract between the two repos is the **image tag**.
 
 ```
-terraform/   Magnum cluster (1 master + 3 workers, autoscale 3–6, GitLab-managed state)
+terraform/   Magnum cluster (1 master + 3 workers, autoscale 3–4, GitLab-managed state)
 chart/       Helm chart: 3 Indexed CronJobs + ConfigMap + (opt) Fluent Bit + freshness rule
 argocd/      AppProject + ApplicationSet (qa/prod) + app-of-apps + kube-prometheus-stack
-scripts/     sync-secret.sh  (tbag → K8s Secret bridge; run from an itdcim/avtools host)
+scripts/     start-here.sh   (the entry point: checks the chain, inits + plans)
+             env.example.sh  (the 3 values you supply; copy to env.sh, gitignored)
+             os-auth.sh      (Kerberos → scoped token for Terraform; and why)
+             sync-secret.sh  (tbag → K8s Secret bridge; run from an itdcim/avtools host)
 secrets/     secret.example.yaml (manual fallback; a filled secret.yaml is gitignored)
 ```
+
+The OpenStack project is **`av-tools`** (with a hyphen).
 
 ## The app ⇄ infra boundary
 
@@ -26,12 +33,19 @@ into git, and no per-release infra commit.
 
 ## Deploy
 
+0. **Everything below the app** — `./scripts/start-here.sh` (see
+   [`START-HERE.md`](START-HERE.md)). It walks the chain and stops wherever you are.
 1. **Cluster** — see [`terraform/README.md`](terraform/README.md).
-2. **ArgoCD** — see [`argocd/README.md`](argocd/README.md): install ArgoCD, register this
-   repo, then `kubectl apply -n argocd -f argocd/app-of-apps.yaml`.
-3. **Secrets** — `AVTOOLS_ENVIRONMENT=qa ./scripts/sync-secret.sh` from an
+2. **Secrets** — `AVTOOLS_ENVIRONMENT=qa ./scripts/sync-secret.sh` from an
    `itdcim/avtools` host (the monolith during the overlap). Secrets stay in tbag; this
    only bridges them into a K8s Secret ArgoCD never manages.
+3. **ArgoCD** — see [`argocd/README.md`](argocd/README.md): install ArgoCD, register this
+   repo, then `kubectl apply -n argocd -f argocd/app-of-apps.yaml`.
+
+> ⚠️ **Steps 2–3 are blocked**: `registry.cern.ch/itdcim/avtools:{qa,prod}` does not
+> exist yet. `av-tools` `master` has no Dockerfile and no image build job — the
+> Dockerfile lives only on the unmerged `feature/k8s-magnum-buildout`. Deploying the
+> chart today yields `ImagePullBackOff`. See [`START-HERE.md`](START-HERE.md).
 
 ## Promotion (master mirrors QA)
 
