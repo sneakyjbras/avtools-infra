@@ -10,11 +10,16 @@ variable "cluster_name" {
 
 variable "cluster_template" {
   description = <<-EOT
-    Public CERN Magnum cluster template name (or UUID). Versions change often —
-    check `openstack coe cluster template list` before applying.
+    Public CERN Magnum cluster template name (or UUID). Versions are RETIRED,
+    not just superseded — `kubernetes-1.33.3-1` vanished within months. Always
+    run `openstack coe cluster template list` before applying.
+
+    Avoid the `-argo` variants: they set cern_chart_enabled=false (stripped, for
+    CERN's newer Argo-based addon delivery). This repo assumes the plain
+    template's cern_chart for the autoscaler and `logging_producer` fluentd.
   EOT
   type        = string
-  default     = "kubernetes-1.33.3-1"
+  default     = "kubernetes-1.35.3-2"
 }
 
 variable "keypair" {
@@ -53,9 +58,22 @@ variable "autoscale_min" {
 }
 
 variable "autoscale_max" {
-  description = "cluster-autoscaler maximum worker count (bounded by project quota)."
+  description = <<-EOT
+    cluster-autoscaler maximum worker count.
+
+    Bounded by CORES, not instances. The av-tools project quota is 10 instances
+    but only 10 CORES, and m2.medium is 2 cores — so 5 instances total is the
+    real ceiling: 1 master + 4 workers. A previous value of 6 was unreachable
+    (7 nodes = 14 cores); the autoscaler would have silently failed to scale.
+  EOT
   type        = number
-  default     = 6
+  default     = 4
+
+  validation {
+    # 1 master + max workers, at 2 cores each, must fit the 10-core quota.
+    condition     = (1 + var.autoscale_max) * 2 <= 10
+    error_message = "(1 master + autoscale_max) * 2 cores must fit the 10-core quota => autoscale_max <= 4."
+  }
 }
 
 variable "extra_labels" {
@@ -63,12 +81,13 @@ variable "extra_labels" {
     Extra Magnum labels merged on top of the template labels (merge_labels=true).
     Defaults enable the cluster-autoscaler and the central logging producer so
     cluster service logs ship to CERN IT logging.
+
+    min_node_count/max_node_count are NOT set here — main.tf derives them from
+    autoscale_min/autoscale_max so the labels and the variables cannot drift.
   EOT
   type        = map(string)
   default = {
     auto_scaling_enabled = "true"
-    min_node_count       = "3"
-    max_node_count       = "6"
     logging_producer     = "true"
   }
 }

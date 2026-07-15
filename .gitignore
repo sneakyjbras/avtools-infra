@@ -1,3 +1,6 @@
+# Your machine-specific values + credentials (copy of scripts/env.example.sh)
+scripts/env.sh
+
 # Terraform
 terraform/.terraform/
 terraform/*.tfstate

@@ -33,10 +33,20 @@ resource "openstack_containerinfra_cluster_v1" "avtools" {
   merge_labels = true
   labels       = local.labels
 
-  # Cluster creation on Magnum can take several minutes.
+  # Magnum creation is SLOW and 30m was not enough (observed 2026-07-15: all four
+  # VMs Active at ~20 min, cluster still CREATE_IN_PROGRESS at 25+).
+  #
+  # "Active" instances only mean the VMs booted. Heat then waits on ignition,
+  # the Kubernetes bootstrap, and the cern_chart addon install — and the CERN
+  # template itself budgets `helm-install-timeout: 45m0s` for that last stage
+  # alone. So the create timeout must comfortably exceed 45m.
+  #
+  # This matters beyond patience: when Terraform times out it errors while Magnum
+  # happily keeps building, leaving state out of step with a cluster that is
+  # actually fine.
   timeouts {
-    create = "30m"
-    update = "30m"
-    delete = "20m"
+    create = "60m"
+    update = "60m"
+    delete = "30m"
   }
 }
