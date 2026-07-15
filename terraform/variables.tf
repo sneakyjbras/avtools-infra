@@ -72,7 +72,7 @@ variable "autoscale_max" {
   validation {
     # 1 master + max workers, at 2 cores each, must fit the 10-core quota.
     condition     = (1 + var.autoscale_max) * 2 <= 10
-    error_message = "(1 master + autoscale_max) * 2 cores must fit the 10-core quota => autoscale_max <= 4."
+    error_message = "Quota is 10 cores and m2.medium is 2 cores, so 1 master plus autoscale_max workers must fit in 5 instances. Set autoscale_max to 4 or lower."
   }
 }
 
