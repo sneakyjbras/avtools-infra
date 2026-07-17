@@ -56,9 +56,21 @@ variable "flavor" {
 }
 
 variable "master_flavor" {
-  description = "Control-plane flavor. Null keeps the template default."
+  description = <<-EOT
+    Control-plane flavor. Default m2.large (4 vCPU / 7.5 GB) is DELIBERATE and
+    load-bearing — do not drop it back to the template default (m2.medium).
+
+    Root-caused 2026-07-17 after two CREATE_FAILEDs: the m2.medium master
+    (2 vCPU / 3.75 GB) cannot run etcd + the control plane + CERN's full
+    cern-magnum addon bundle (Falco, Prometheus, Velero, cert-manager, Cilium,
+    4x CSI, autoscaler, NFD, fluentd...) all installing at once. Measured on the
+    failed master: 114 MiB free RAM, load 5.2 on 2 cores, a cascade of
+    "context deadline exceeded" probe failures → the cern-magnum Helm install
+    never converged → CREATE_FAILED. m2.large gives the headroom; first build on
+    it reached CREATE_COMPLETE. See START-HERE.md ("things that bite").
+  EOT
   type        = string
-  default     = null
+  default     = "m2.large"
 }
 
 variable "autoscale_min" {
@@ -71,18 +83,20 @@ variable "autoscale_max" {
   description = <<-EOT
     cluster-autoscaler maximum worker count.
 
-    Bounded by CORES, not instances. The av-tools project quota is 10 instances
-    but only 10 CORES, and m2.medium is 2 cores — so 5 instances total is the
-    real ceiling: 1 master + 4 workers. A previous value of 6 was unreachable
-    (7 nodes = 14 cores); the autoscaler would have silently failed to scale.
+    Bounded by CORES, not instances. Quota is 10 cores. With the m2.large master
+    (4 cores) the fix above requires, and m2.medium workers (2 cores each):
+    4 + 2*max <= 10  =>  max <= 3. So 3 workers is the ceiling and there is no
+    headroom to autoscale past node_count; min == max == 3 today. (Getting a
+    cluster that builds at all mattered more than scaling room — the m2.large
+    master is non-negotiable, see above.)
   EOT
   type        = number
-  default     = 4
+  default     = 3
 
   validation {
-    # 1 master + max workers, at 2 cores each, must fit the 10-core quota.
-    condition     = (1 + var.autoscale_max) * 2 <= 10
-    error_message = "Quota is 10 cores and m2.medium is 2 cores, so 1 master plus autoscale_max workers must fit in 5 instances. Set autoscale_max to 4 or lower."
+    # m2.large master (4 cores) + max workers at 2 cores each, within 10 cores.
+    condition     = 4 + var.autoscale_max * 2 <= 10
+    error_message = "Quota is 10 cores; the m2.large master uses 4, leaving room for 3 m2.medium workers. Set autoscale_max to 3 or lower."
   }
 }
 
