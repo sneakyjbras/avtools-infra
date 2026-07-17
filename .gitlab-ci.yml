@@ -1,5 +1,15 @@
-# CI for the GitOps/infra repo: validate Terraform + Helm; ArgoCD does the deploy.
-# master mirrors QA; terraform apply is manual on master.
+# CI for the GitOps/infra repo: VALIDATE ONLY (Terraform syntax + Helm chart).
+#
+# Terraform plan/apply are NOT run in CI, on purpose:
+#   - `apply` needs a Keystone trust, which Magnum can only create for a Kerberos
+#     user; CI's application credentials cannot (see docs/cluster-buildout-runbook.md).
+#   - `plan` needs OpenStack read auth for the cluster_template data source, which
+#     CI has no credentials for either ("One of 'auth_url' or 'cloud' must be...").
+# So cluster plan/apply are local, human-with-Kerberos operations:
+#     kinit <you>@CERN.CH && source scripts/os-auth.sh && cd terraform && terraform apply
+# CI's job is to catch broken Terraform/Helm before it reaches a human — which it
+# does auth-free. (To add MR `plan` diffs later, set OS_* app-credential CI vars
+# and restore a plan job; it only enables plan, not apply.)
 #
 # GitLab SAST + Secret Detection (enabled via the project UI) are preserved below.
 include:
@@ -10,8 +20,6 @@ stages:
   - validate
   - test # SAST
   - secret-detection
-  - plan
-  - deploy
 
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/terraform
@@ -37,6 +45,7 @@ secret_detection:
     paths:
       - ${TF_ROOT}/.terraform
 
+# Syntax + config validation only. -backend=false needs no state/credentials.
 tf_fmt_validate:
   extends: .tf
   stage: validate
@@ -45,30 +54,6 @@ tf_fmt_validate:
     - terraform fmt -check -recursive
     - terraform init -backend=false
     - terraform validate
-
-tf_plan:
-  extends: .tf
-  stage: plan
-  script:
-    - gitlab-terraform plan
-    - gitlab-terraform plan-json
-  artifacts:
-    reports:
-      terraform: ${TF_ROOT}/plan.json
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == "master"'
-
-tf_apply:
-  extends: .tf
-  stage: deploy
-  # Serialize applies; manual gate on master only.
-  resource_group: ${TF_STATE_NAME}
-  script:
-    - gitlab-terraform apply
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "master"'
-      when: manual
 
 # ---------------------------------------------------------------------------
 # Helm chart: lint + render + schema-validate every manifest (both envs)
