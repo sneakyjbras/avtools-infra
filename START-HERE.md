@@ -65,10 +65,21 @@ just yields `ImagePullBackOff` on every CronJob.
 
 **Fix that in `av-tools` before touching `argocd/` or `chart/`.**
 
-## Summary: the five things that bite
+## Summary: the things that bite
 
-All five are now enforced by `start-here.sh` rather than trusted to a reader.
+Most are now enforced by `start-here.sh` or baked into `variables.tf` defaults
+rather than trusted to a reader.
 
+0. **The master must be `m2.large`, not the default `m2.medium`.** The single
+   costliest lesson here (two days, two failed builds). CERN installs ~15 heavy
+   addons on the master at boot (Falco, Prometheus, Velero, cert-manager, Cilium,
+   4× CSI, autoscaler, NFD, fluentd…) via one Helm install. On `m2.medium`
+   (3.75 GB) the control plane starves — measured 114 MiB free RAM, load 5.2 on
+   2 cores — probes time out, addon pods get liveness-killed and restart-storm,
+   the Helm install never converges → `CREATE_FAILED`, with all VMs deceptively
+   `ACTIVE`. `m2.large` (7.5 GB) has the headroom; it built first try. This is
+   now the default in `variables.tf` — do not lower it. Diagnosis that worked:
+   SSH into the master, `kubectl get pods -A | grep -v Running`, then `free -h`.
 1. **Application credentials CANNOT create the cluster.** This is the big one.
    Magnum needs a Keystone **trust**, and trust creation from an app credential
    fails at CERN — *including* with `unrestricted = True`, which the Keystone

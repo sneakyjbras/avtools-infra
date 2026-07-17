@@ -1,18 +1,23 @@
 # Copy to terraform.tfvars and adjust. No secrets belong here — OpenStack auth
-# comes from application-credential env vars / clouds.yaml.
+# comes from Kerberos via scripts/os-auth.sh (NOT app credentials). See
+# START-HERE.md. Every value below already has a sensible default in
+# variables.tf; this file just lets you override per-machine.
 
 cluster_name     = "avtools-k8s"
-cluster_template = "kubernetes-1.33.3-1"
-keypair          = "my-openstack-keypair"
+cluster_template = "kubernetes-1.35.3-2" # templates get RETIRED — check first:
+#                                          openstack coe cluster template list
+keypair          = "avtools-k8s"
 
-# 1 master + 3 workers = 4 of the 10-instance avtools project quota.
 master_count = 1
 node_count   = 3
 
-# cluster-autoscaler bounds (leave headroom under the 10-instance quota).
-autoscale_min = 3
-autoscale_max = 6
+# The master MUST be m2.large. On the default m2.medium (3.75 GB) the CERN addon
+# bundle starves the control plane and cluster creation fails — cost us two days.
+# See variables.tf "master_flavor" for the full post-mortem. Do not lower this.
+master_flavor = "m2.large"
+# flavor      = "m2.medium"   # workers; null/omitted keeps the template default
 
-# Uncomment to override the template flavors:
-# flavor        = "m2.medium"
-# master_flavor = "m2.medium"
+# Quota is 10 CORES. m2.large master (4) + 3 m2.medium workers (6) = 10, exact —
+# so no room to autoscale past 3. min == max == 3.
+autoscale_min = 3
+autoscale_max = 3
