@@ -127,6 +127,8 @@ worth a question to the CERN cloud team rather than more guessing.
 
 ## Reference
 
+- `docs/cluster-buildout-runbook.md` — **full post-mortem + debug playbook**:
+  every failure we hit, its root cause, and how to diagnose a `CREATE_FAILED`
 - `scripts/os-auth.sh` — Kerberos → token bridge, and why it exists
 - `terraform/README.md` — cluster details, CI, teardown
 - `argocd/README.md` — GitOps bootstrap
