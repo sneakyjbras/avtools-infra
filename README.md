@@ -3,6 +3,7 @@
 GitOps + infrastructure for **AV Tools** on CERN **Kubernetes-on-OpenStack (Magnum)**.
 
 ### → New here? [**START-HERE.md**](START-HERE.md), then `./scripts/start-here.sh`
+### → Build failing? [**docs/cluster-buildout-runbook.md**](docs/cluster-buildout-runbook.md) — post-mortem + debug playbook
 
 Application code lives in [`itdcim/av-tools`](https://gitlab.cern.ch/itdcim/av-tools);
 this repo only **deploys** the container image that av-tools builds and publishes to
