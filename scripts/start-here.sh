@@ -234,7 +234,7 @@ if [ -n "$status" ]; then
       echo "  Next: secrets, then ArgoCD — see START-HERE.md"
       echo
       echo "  ⚠ BLOCKED ABOVE HERE: the chart pulls"
-      echo "    registry.cern.ch/itdcim/avtools:qa, which does not exist. av-tools"
+      echo "    registry.cern.ch/avtools/avtools:qa, which does not exist. av-tools"
       echo "    master has no Dockerfile and no image build job. Deploying now"
       echo "    gives ImagePullBackOff on every CronJob. See START-HERE.md."
       echo

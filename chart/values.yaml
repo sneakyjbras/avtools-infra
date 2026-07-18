@@ -9,7 +9,7 @@ availabilityZone: cern-geneva-b
 hostgroup: itdcim/avtools
 
 image:
-  repository: registry.cern.ch/itdcim/avtools
+  repository: registry.cern.ch/avtools/avtools
   # Moving env tag (qa|prod) so ArgoCD need not commit per-SHA image bumps.
   tag: qa
   pullPolicy: Always

@@ -52,7 +52,7 @@ Steps 1–5 are done by `start-here.sh`. Step 6 is somebody's afternoon.
 ## ⚠ The blocker above the cluster
 
 **There is no container image.** The chart pulls
-`registry.cern.ch/itdcim/avtools:qa`, but:
+`registry.cern.ch/avtools/avtools:qa`, but:
 
 - `av-tools` `master` has **no Dockerfile**
 - its CI declares `docker_prepare` / `docker_build` / `docker_test` stages

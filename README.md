@@ -26,7 +26,7 @@ The OpenStack project is **`av-tools`** (with a hyphen).
 
 | `av-tools` (application) | `av-tools-infra` (this repo) |
 |---|---|
-| builds & publishes `registry.cern.ch/itdcim/avtools:{qa,prod}`; owns `src/`, `Dockerfile`, Grafana dashboards, Sentry SDK | provisions the cluster and **deploys** that image via GitOps |
+| builds & publishes `registry.cern.ch/avtools/avtools:{qa,prod}`; owns `src/`, `Dockerfile`, Grafana dashboards, Sentry SDK | provisions the cluster and **deploys** that image via GitOps |
 
 Images use **moving env tags** (`:qa`, `:prod`) with `imagePullPolicy: Always`; since
 the workload is CronJobs, each run pulls the current image — no image-tag write-back
@@ -43,7 +43,7 @@ into git, and no per-release infra commit.
 3. **ArgoCD** — see [`argocd/README.md`](argocd/README.md): install ArgoCD, register this
    repo, then `kubectl apply -n argocd -f argocd/app-of-apps.yaml`.
 
-> ⚠️ **Steps 2–3 are blocked**: `registry.cern.ch/itdcim/avtools:{qa,prod}` does not
+> ⚠️ **Steps 2–3 are blocked**: `registry.cern.ch/avtools/avtools:{qa,prod}` does not
 > exist yet. `av-tools` `master` has no Dockerfile and no image build job — the
 > Dockerfile lives only on the unmerged `feature/k8s-magnum-buildout`. Deploying the
 > chart today yields `ImagePullBackOff`. See [`START-HERE.md`](START-HERE.md).
