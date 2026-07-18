@@ -58,12 +58,26 @@ resources:
 # ---------------------------------------------------------------------------
 # The three batch services. shards == completions == parallelism == SHARD_TOTAL.
 # Sharding is crc32(equipment_no) % SHARD_TOTAL == JOB_COMPLETION_INDEX.
+#
+# ONLY snmp-timeseries is shardable. It does per-device work (SNMP poll one
+# device, write that device's rows), so partitioning the device list across N
+# pods is safe: disjoint devices => disjoint reads and disjoint DB writes.
+#
+# run-eam and run-landb are bulk RECONCILIATION syncs: each fetches the ENTIRE
+# EAM/LanDB inventory, diffs it against Postgres, and upserts. The app code does
+# NOT shard them (run_eam/run_landb take no shard params) — and it shouldn't:
+# reconciliation needs the GLOBAL view to detect stale/orphaned rows, which a
+# shard that sees only its slice cannot do safely. So they MUST be shards: 1.
+# Setting shards > 1 here just runs N identical full syncs that fight over the
+# same rows (contention, wasted DB load, lost updates) — it does not speed
+# anything up. (If EAM reconciliation ever outgrows one pod, the fix is real
+# shard-aware reconciliation in the app, not more copies of the whole sync.)
 # ---------------------------------------------------------------------------
 jobs:
   snmp-timeseries:
     enabled: true
     schedule: "*/2 * * * *"
-    shards: 8
+    shards: 8 # per-device work → shardable
     threads: 16
     command: ["avtools", "--logs", "snmp-timeseries"]
     activeDeadlineSeconds: 100
@@ -73,7 +87,7 @@ jobs:
   run-eam:
     enabled: true
     schedule: "*/2 * * * *"
-    shards: 4
+    shards: 1 # reconciliation sync — MUST stay 1 (was 4: 4x redundant, write contention)
     threads: 16
     command: ["avtools", "--logs", "run-eam"]
     activeDeadlineSeconds: 100
