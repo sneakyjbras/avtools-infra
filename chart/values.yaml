@@ -103,7 +103,7 @@ jobs:
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
   run-eam:
     enabled: true
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     shards: 1 # reconciliation sync — MUST stay 1 (was 4: 4x redundant, write contention)
     threads: 8 # was 16: single pod, I/O-bound; halved to cut peak CPU on 6 cores
     command: ["avtools", "--logs", "run-eam"]
@@ -113,7 +113,7 @@ jobs:
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "MY_PASSWORD"]
   run-landb:
     enabled: true
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     shards: 1
     threads: 4 # was 8: single pod, I/O-bound; halved to cut peak CPU on 6 cores
     command: ["avtools", "--logs", "run-landb"]

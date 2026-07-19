@@ -15,6 +15,6 @@ jobs:
   snmp-timeseries:
     schedule: "*/15 * * * *"
   run-eam:
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
   run-landb:
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
