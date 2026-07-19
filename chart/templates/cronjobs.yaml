@@ -79,9 +79,16 @@ spec:
               volumeMounts:
                 - name: logdir
                   mountPath: /tmp/avtools
+                # cern_oauthlib writes its OAuth token cache under ~/.cache; the
+                # root FS is read-only, so give it a writable emptyDir. Without
+                # this, LanDB auth fails and the SNMP fleet comes back empty.
+                - name: cachedir
+                  mountPath: /home/avtools/.cache
               resources: {{- toYaml $.Values.resources | nindent 16 }}
           volumes:
             - name: logdir
+              emptyDir: {}
+            - name: cachedir
               emptyDir: {}
 {{- end }}
 {{- end }}
