@@ -29,6 +29,18 @@ spec:
           restartPolicy: Never
           serviceAccountName: {{ include "avtools.serviceAccountName" $ }}
           automountServiceAccountToken: false
+          {{- if $.Values.topologySpread.enabled }}
+          # Spread same-component pods one-per-node so snmp-timeseries' shards
+          # land one per worker node instead of stacking on a single 2-core box.
+          # Soft (ScheduleAnyway) so a down/cordoned node never blocks the tick.
+          topologySpreadConstraints:
+            - maxSkew: {{ $.Values.topologySpread.maxSkew | default 1 }}
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: {{ $.Values.topologySpread.whenUnsatisfiable | default "ScheduleAnyway" }}
+              labelSelector:
+                matchLabels: {{- include "avtools.selectorLabels" $ | nindent 18 }}
+                  app.kubernetes.io/component: {{ $name }}
+          {{- end }}
           {{- with $.Values.imagePullSecrets }}
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}

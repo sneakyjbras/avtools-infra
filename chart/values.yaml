@@ -56,6 +56,19 @@ resources:
     memory: 512Mi
 
 # ---------------------------------------------------------------------------
+# Node partitioning. The worker pool is 3 nodes x 2 cores = 6 cores. Spread the
+# same-component pods one-per-node so a shardable job (snmp-timeseries: 3 shards)
+# lands exactly one pod per worker node instead of piling 2+ shards onto one box
+# and starving another. Soft (ScheduleAnyway) so a cordoned/down node never
+# blocks the tick — it just co-locates until the node returns. No-op for the
+# single-pod reconciliation jobs (run-eam / run-landb).
+# ---------------------------------------------------------------------------
+topologySpread:
+  enabled: true
+  maxSkew: 1
+  whenUnsatisfiable: ScheduleAnyway
+
+# ---------------------------------------------------------------------------
 # The three batch services. shards == completions == parallelism == SHARD_TOTAL.
 # Sharding is crc32(equipment_no) % SHARD_TOTAL == JOB_COMPLETION_INDEX.
 #
@@ -76,31 +89,35 @@ resources:
 jobs:
   snmp-timeseries:
     enabled: true
-    schedule: "*/2 * * * *"
-    shards: 8 # per-device work → shardable
-    threads: 16
+    schedule: "*/5 * * * *"
+    # 3 shards = one pod per worker node (3 nodes x 2 cores). threads=4 is the
+    # per-pod SNMP I/O concurrency (2 per core). 3 x 4 = 12 concurrent SNMP
+    # threads on 6 cores, down from 8 x 16 = 128 — the old oversubscription was
+    # the source of the emit-timing jitter (Room Connectivity panel).
+    shards: 3 # per-device work → shardable; one shard per worker node
+    threads: 4
     command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 100
+    activeDeadlineSeconds: 240 # fewer threads → longer run; fits the 5-min window
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
   run-eam:
     enabled: true
-    schedule: "*/2 * * * *"
+    schedule: "*/5 * * * *"
     shards: 1 # reconciliation sync — MUST stay 1 (was 4: 4x redundant, write contention)
-    threads: 16
+    threads: 8 # was 16: single pod, I/O-bound; halved to cut peak CPU on 6 cores
     command: ["avtools", "--logs", "run-eam"]
-    activeDeadlineSeconds: 100
+    activeDeadlineSeconds: 240
     backoffLimit: 1
     netRaw: false
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "MY_PASSWORD"]
   run-landb:
     enabled: true
-    schedule: "*/2 * * * *"
+    schedule: "*/5 * * * *"
     shards: 1
-    threads: 8
+    threads: 4 # was 8: single pod, I/O-bound; halved to cut peak CPU on 6 cores
     command: ["avtools", "--logs", "run-landb"]
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180
     backoffLimit: 1
     netRaw: false
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "LANDB_CLIENT_SECRET"]

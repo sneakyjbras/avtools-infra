@@ -9,11 +9,12 @@ eam:
 landb:
   clientId: av-tools-qa
 
-# QA can run a touch hotter while ramp-testing toward */1.
+# 5-min cadence: matches the Grafana 5-min tick bucketing and gives the
+# lower-thread pods room to finish inside the window.
 jobs:
   snmp-timeseries:
-    schedule: "*/2 * * * *"
+    schedule: "*/5 * * * *"
   run-eam:
-    schedule: "*/2 * * * *"
+    schedule: "*/5 * * * *"
   run-landb:
-    schedule: "*/2 * * * *"
+    schedule: "*/5 * * * *"
