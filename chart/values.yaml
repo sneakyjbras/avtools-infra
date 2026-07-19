@@ -89,7 +89,7 @@ topologySpread:
 jobs:
   snmp-timeseries:
     enabled: true
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     # 3 shards = one pod per worker node (3 nodes x 2 cores). threads=4 is the
     # per-pod SNMP I/O concurrency (2 per core). 3 x 4 = 12 concurrent SNMP
     # threads on 6 cores, down from 8 x 16 = 128 — the old oversubscription was
@@ -97,7 +97,7 @@ jobs:
     shards: 3 # per-device work → shardable; one shard per worker node
     threads: 4
     command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 240 # fewer threads → longer run; fits the 5-min window
+    activeDeadlineSeconds: 600 # 12 total threads (3x4) → slow sweep; fits the 15-min window
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]

@@ -13,7 +13,7 @@ landb:
 # lower-thread pods room to finish inside the window.
 jobs:
   snmp-timeseries:
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
   run-eam:
     schedule: "*/5 * * * *"
   run-landb:
