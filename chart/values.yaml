@@ -89,23 +89,23 @@ topologySpread:
 jobs:
   snmp-timeseries:
     enabled: true
-    schedule: "*/15 * * * *"
-    # 3 shards = one pod per worker node (3 nodes x 2 cores). threads=4 is the
-    # per-pod SNMP I/O concurrency (2 per core). 3 x 4 = 12 concurrent SNMP
-    # threads on 6 cores, down from 8 x 16 = 128 — the old oversubscription was
-    # the source of the emit-timing jitter (Room Connectivity panel).
-    shards: 3 # per-device work → shardable; one shard per worker node
-    threads: 4
+    schedule: "*/5 * * * *"
+    # SNMP is I/O-bound (threads mostly wait on the network), so we scale
+    # concurrency up for throughput without saturating the 6 cores. 6 shards x 8
+    # threads = 48 concurrent SNMP threads (2 pods/node via topologySpread), up
+    # from 3 x 4 = 12 which was too slow to sweep the fleet within a 5-min window.
+    shards: 6 # per-device work → shardable; 2 pods per worker node
+    threads: 8
     command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 600 # 12 total threads (3x4) → slow sweep; fits the 15-min window
+    activeDeadlineSeconds: 240 # 48 concurrent I/O threads → fast sweep; fits the 5-min window
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
   run-eam:
     enabled: true
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
     shards: 1 # reconciliation sync — MUST stay 1 (was 4: 4x redundant, write contention)
-    threads: 8 # was 16: single pod, I/O-bound; halved to cut peak CPU on 6 cores
+    threads: 16 # single pod, I/O-bound; raised for reconciliation throughput
     command: ["avtools", "--logs", "run-eam"]
     activeDeadlineSeconds: 240
     backoffLimit: 1
@@ -113,9 +113,9 @@ jobs:
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "MY_PASSWORD"]
   run-landb:
     enabled: true
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
     shards: 1
-    threads: 4 # was 8: single pod, I/O-bound; halved to cut peak CPU on 6 cores
+    threads: 8 # single pod, I/O-bound; raised for throughput
     command: ["avtools", "--logs", "run-landb"]
     activeDeadlineSeconds: 180
     backoffLimit: 1

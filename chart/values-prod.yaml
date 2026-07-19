@@ -9,12 +9,12 @@ eam:
 landb:
   clientId: av-tools
 
-# 15-min cadence: matches the Grafana 15-min interval/gather and gives the
-# 12-thread (3x4) snmp sweep room to finish inside the window.
+# 5-min cadence: matches the Grafana 5-min interval/gather; the 48-thread (6x8)
+# snmp sweep finishes inside the window.
 jobs:
   snmp-timeseries:
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
   run-eam:
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
   run-landb:
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
