@@ -91,11 +91,10 @@ jobs:
     enabled: true
     schedule: "*/5 * * * *"
     # SNMP is I/O-bound (threads mostly wait on the network), so we scale
-    # concurrency up for throughput without saturating the 6 cores. 6 shards x 8
-    # threads = 48 concurrent SNMP threads (2 pods/node via topologySpread), up
-    # from 3 x 4 = 12 which was too slow to sweep the fleet within a 5-min window.
-    shards: 6 # per-device work → shardable; 2 pods per worker node
-    threads: 8
+    # concurrency up for throughput without saturating the 6 cores. 8 shards x 8
+    # threads = 64 concurrent SNMP threads (spread ~3/3/2 across the 3 nodes via
+    # topologySpread), up from 6 x 8 = 48. Dial back if cycle_duration spikes.
+    shards: 8 # per-device work → shardable; ~3 pods per worker node
     command: ["avtools", "--logs", "snmp-timeseries"]
     activeDeadlineSeconds: 240 # 48 concurrent I/O threads → fast sweep; fits the 5-min window
     backoffLimit: 1
