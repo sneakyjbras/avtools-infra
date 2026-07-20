@@ -51,15 +51,22 @@ variable "master_count" {
 
 variable "flavor" {
   description = <<-EOT
-    Worker node flavor. Null keeps the template default (m2.medium, 2 vCPU /
-    3.75 GB). Set to m2.large (4 vCPU / 7.5 GB) as of the 2026-07 rescale: the
-    cluster is MEMORY-bound, not CPU-bound — the 3.75 GB m2.medium workers ran
-    94-96% memory-allocated, so a scheduling hiccup starved pods and jittered the
-    metric sweep. m2.large doubles per-node RAM to 7.5 GB and lets 8 snmp shards
-    spread ~2/node with real headroom.
+    Worker node flavor. Null keeps the template default (m2.medium).
+
+    DANGER — DO NOT change this on a LIVE cluster. `flavor` is immutable on the
+    Magnum cluster resource, so terraform treats any change as
+    `forces replacement` and will DESTROY + recreate the ENTIRE cluster (master,
+    ArgoCD, avtools-qa, all workloads). Confirmed via `terraform plan` on
+    2026-07-20 ("cluster must be replaced ... Plan: 1 to add, 1 to destroy").
+
+    The cluster IS memory-bound and workers should move to m2.large — but do it
+    with a NODEGROUP migration, NOT this variable: create an m2.large nodegroup
+    (`openstack coe nodegroup create ... --flavor m2.large`), drain the m2.medium
+    default nodegroup onto it, then remove the old one. Quota-tight (3x m2.medium
+    + 4x m2.large = 26 > 20 cores), so it's a staged swap.
   EOT
   type        = string
-  default     = "m2.large"
+  default     = null
 }
 
 variable "master_flavor" {
