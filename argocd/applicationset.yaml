@@ -13,9 +13,23 @@ spec:
           - env: qa
             namespace: avtools-qa
             targetRevision: master
-          - env: prod
-            namespace: avtools-prod
-            targetRevision: prod
+          # PROD IS INTENTIONALLY DISABLED (2026-07, phase 1 of the prod cutover).
+          # The `prod` branch is 25 commits stale and pins a dead image
+          # (registry.cern.ch/itdcim/avtools) on a */2 schedule, so the generated
+          # avtools-prod Application only ever spawned ErrImagePull pods that
+          # hoarded memory on the (then 3.75 GB) workers and starved avtools-qa.
+          # Dropping this element makes the ApplicationSet controller delete the
+          # generated `avtools-prod` Application; with the ApplicationSet default
+          # preserveResourcesOnDeletion=false that cascades a prune of the
+          # avtools-prod namespace's workloads, freeing the memory. avtools-qa
+          # (the element above) is untouched.
+          #
+          # RE-ENABLE only during the real cutover — see the phase-2 CUTOVER
+          # RUNBOOK (docs/prod-cutover-runbook.md): the `prod` branch must first
+          # be brought up to master's chart, or this just recreates the broken app.
+          # - env: prod
+          #   namespace: avtools-prod
+          #   targetRevision: prod
   template:
     metadata:
       name: 'avtools-{{.env}}'
