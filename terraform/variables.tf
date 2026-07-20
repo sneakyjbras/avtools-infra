@@ -40,7 +40,7 @@ variable "keypair" {
 variable "node_count" {
   description = "Number of worker nodes (master_count is fixed at 1)."
   type        = number
-  default     = 3
+  default     = 4
 }
 
 variable "master_count" {
@@ -50,9 +50,16 @@ variable "master_count" {
 }
 
 variable "flavor" {
-  description = "Worker node flavor. Null keeps the template default (m2.medium)."
+  description = <<-EOT
+    Worker node flavor. Null keeps the template default (m2.medium, 2 vCPU /
+    3.75 GB). Set to m2.large (4 vCPU / 7.5 GB) as of the 2026-07 rescale: the
+    cluster is MEMORY-bound, not CPU-bound — the 3.75 GB m2.medium workers ran
+    94-96% memory-allocated, so a scheduling hiccup starved pods and jittered the
+    metric sweep. m2.large doubles per-node RAM to 7.5 GB and lets 8 snmp shards
+    spread ~2/node with real headroom.
+  EOT
   type        = string
-  default     = null
+  default     = "m2.large"
 }
 
 variable "master_flavor" {
@@ -76,27 +83,27 @@ variable "master_flavor" {
 variable "autoscale_min" {
   description = "cluster-autoscaler minimum worker count."
   type        = number
-  default     = 3
+  default     = 4
 }
 
 variable "autoscale_max" {
   description = <<-EOT
     cluster-autoscaler maximum worker count.
 
-    Bounded by CORES, not instances. Quota is 10 cores. With the m2.large master
-    (4 cores) the fix above requires, and m2.medium workers (2 cores each):
-    4 + 2*max <= 10  =>  max <= 3. So 3 workers is the ceiling and there is no
-    headroom to autoscale past node_count; min == max == 3 today. (Getting a
-    cluster that builds at all mattered more than scaling room — the m2.large
-    master is non-negotiable, see above.)
+    Bounded by CORES, not instances. Quota was raised 2026-07 to 20 cores. With
+    the m2.large master (4 cores) and m2.large workers (4 cores each):
+    4 + 4*max <= 20  =>  max <= 4. So 4 workers is the ceiling and it exactly
+    maxes the quota (4 + 4*4 = 20); min == max == 4 today, no headroom to
+    autoscale past node_count. (The m2.large master is non-negotiable — see the
+    master_flavor post-mortem above.)
   EOT
   type        = number
-  default     = 3
+  default     = 4
 
   validation {
-    # m2.large master (4 cores) + max workers at 2 cores each, within 10 cores.
-    condition     = 4 + var.autoscale_max * 2 <= 10
-    error_message = "Quota is 10 cores; the m2.large master uses 4, leaving room for 3 m2.medium workers. Set autoscale_max to 3 or lower."
+    # m2.large master (4 cores) + max workers at 4 cores each, within 20 cores.
+    condition     = 4 + var.autoscale_max * 4 <= 20
+    error_message = "Quota is 20 cores; the m2.large master uses 4, leaving room for 4 m2.large workers. Set autoscale_max to 4 or lower."
   }
 }
 

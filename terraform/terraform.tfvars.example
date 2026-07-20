@@ -9,15 +9,18 @@ cluster_template = "kubernetes-1.35.3-2" # templates get RETIRED — check first
 keypair          = "avtools-k8s"
 
 master_count = 1
-node_count   = 3
+node_count   = 4
 
 # The master MUST be m2.large. On the default m2.medium (3.75 GB) the CERN addon
 # bundle starves the control plane and cluster creation fails — cost us two days.
 # See variables.tf "master_flavor" for the full post-mortem. Do not lower this.
 master_flavor = "m2.large"
-# flavor      = "m2.medium"   # workers; null/omitted keeps the template default
 
-# Quota is 10 CORES. m2.large master (4) + 3 m2.medium workers (6) = 10, exact —
-# so no room to autoscale past 3. min == max == 3.
-autoscale_min = 3
-autoscale_max = 3
+# Workers are m2.large too as of the 2026-07 rescale: the cluster is MEMORY-bound
+# (the 3.75 GB m2.medium workers ran 94-96% mem-allocated). m2.large = 7.5 GB/node.
+flavor = "m2.large"
+
+# Quota was raised to 20 CORES. m2.large master (4) + 4 m2.large workers (16) = 20,
+# exact — so no room to autoscale past 4. min == max == 4.
+autoscale_min = 4
+autoscale_max = 4
