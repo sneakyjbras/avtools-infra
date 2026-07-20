@@ -4,8 +4,8 @@
 > `./scripts/start-here.sh`. It does the setup and checks below for you.
 
 Provisions the Kubernetes-on-OpenStack (Magnum) cluster in the **`av-tools`**
-OpenStack project: **1 master + 3 workers** (`m2.medium`), `cluster-autoscaler`
-min 3 / max 4. State lives in **GitLab-managed Terraform state** (no extra infra).
+OpenStack project: **1 master + 4 workers** (all `m2.large`), `cluster-autoscaler`
+min 4 / max 4. State lives in **GitLab-managed Terraform state** (no extra infra).
 
 ## The three constraints you cannot design around
 
@@ -16,9 +16,11 @@ then `CREATE_FAILED: Failed to create trustee or trust` ~30s into apply. Terrafo
 provider can't speak Kerberos, so `scripts/os-auth.sh` bridges Kerberos → scoped
 token → Terraform. This also means **CI cannot apply** (see below).
 
-**Quota is cores.** 10 instances / **10 cores** / 20 GB. `m2.medium` = 2 cores →
-**5 instances max**, master included. `autoscale_max` has a `validation` block
-enforcing this; if you move to a bigger flavor, update that rule too.
+**Quota is cores.** As of 2026-07 the quota is 20 instances / **20 cores** / 40 GB
+(was 10 cores). The cluster is **1 master + 4 workers, all `m2.large`** (4 cores
+each): 4 + 4×4 = **20 cores, exact** — the quota is fully used, no room to
+autoscale past 4. `autoscale_max` has a `validation` block enforcing this
+(`4 + max*4 <= 20`); if you change a flavor, update that rule too.
 
 **Templates get retired**, not just superseded — `kubernetes-1.33.3-1` was gone
 within months of being written here. `openstack coe cluster template list` before
@@ -74,6 +76,25 @@ authenticates with an application credential, which cannot create the Magnum
 trust. Cluster creation is a human-with-Kerberos operation today. Automating it
 would need a service account permitted to create trusts — ask the CERN cloud team
 rather than guessing.
+
+## Rescaling workers (m2.medium → m2.large)
+
+The 2026-07 rescale changes the worker `flavor` from the template default
+(`m2.medium`, 3.75 GB) to `m2.large` (7.5 GB) and grows `node_count` 3 → 4. On
+`terraform apply` Magnum performs a **rolling node replacement**: changing a
+node-group flavor is destructive per node — each worker is drained, deleted, and
+recreated on the new flavor one at a time (the master is untouched). Expect:
+
+- The apply to take a while (each node is a full VM create; see the 60m timeout).
+- Pods to reschedule as nodes cycle. The CronJobs are AP-model and idempotent
+  (`concurrencyPolicy: Forbid`, a missed tick converges on the next), so a sweep
+  landing mid-roll simply retries — no data loss, at most one jittered cycle.
+- Transient capacity crunch: a new m2.large (4 cores) can only be created once
+  the quota allows it. At 20 cores the old 10-core footprint has room, but if a
+  replacement ever stalls on quota, let the old node delete first.
+
+Verify after: `kubectl get nodes -o wide` shows 4 workers, and
+`openstack server list` shows them all on `m2.large`.
 
 ## Notes
 

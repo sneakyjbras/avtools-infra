@@ -47,6 +47,13 @@ sentry:
   enabled: false
   tracesSampleRate: "0.0"
 
+# Per-pod sizing. Unchanged from the 3x m2.medium era on purpose: the memory
+# starvation that jittered the sweep was the 3.75 GB nodes running 94-96%
+# mem-allocated, NOT the request itself — the 2026-07 move to 7.5 GB m2.large
+# workers is the fix. On m2.large (~6.5 GB allocatable) with ~2 pods/node, a
+# 256Mi request reserves <768Mi/node and leaves >5.5 GB headroom. CPU stays low
+# (250m request) because the work is I/O-bound SNMP/HTTP that mostly waits on the
+# network; the 1-core limit lets a pod burst without hogging a 4-core node.
 resources:
   requests:
     cpu: 250m
@@ -56,10 +63,12 @@ resources:
     memory: 512Mi
 
 # ---------------------------------------------------------------------------
-# Node partitioning. The worker pool is 3 nodes x 2 cores = 6 cores. Spread the
-# same-component pods one-per-node so a shardable job (snmp-timeseries: 3 shards)
-# lands exactly one pod per worker node instead of piling 2+ shards onto one box
-# and starving another. Soft (ScheduleAnyway) so a cordoned/down node never
+# Node partitioning. The worker pool is 4 nodes x 4 cores = 16 cores (2026-07
+# rescale: 4x m2.large, up from 3x m2.medium). Spread the same-component pods
+# evenly across nodes so the shardable job (snmp-timeseries: 8 shards) lands
+# ~2 pods per worker node instead of piling several shards onto one box and
+# starving another. maxSkew 1 keeps the per-node count within 1 of even (8
+# shards / 4 nodes = 2/node). Soft (ScheduleAnyway) so a cordoned/down node never
 # blocks the tick — it just co-locates until the node returns. No-op for the
 # single-pod reconciliation jobs (run-eam / run-landb).
 # ---------------------------------------------------------------------------
@@ -91,12 +100,14 @@ jobs:
     enabled: true
     schedule: "*/5 * * * *"
     # SNMP is I/O-bound (threads mostly wait on the network), so we scale
-    # concurrency up for throughput without saturating the 6 cores. 8 shards x 8
-    # threads = 64 concurrent SNMP threads (spread ~3/3/2 across the 3 nodes via
-    # topologySpread), up from 6 x 8 = 48. Dial back if cycle_duration spikes.
-    shards: 8 # per-device work → shardable; ~3 pods per worker node
+    # concurrency up for throughput without saturating the 16 cores. 8 shards x
+    # 10 threads = 80 concurrent SNMP threads (spread ~2/node across the 4
+    # m2.large workers via topologySpread), up from 8 x 8 = 64 on the old 6-core
+    # pool. Dial back if cycle_duration approaches the 240s deadline.
+    shards: 8 # per-device work → shardable; ~2 pods per worker node
+    threads: 10 # I/O-bound; 8 shards x 10 = 80 concurrent, sweep well under 5 min
     command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 240 # 48 concurrent I/O threads → fast sweep; fits the 5-min window
+    activeDeadlineSeconds: 240 # 80 concurrent I/O threads → fast sweep; fits the 5-min window
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
