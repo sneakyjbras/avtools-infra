@@ -98,16 +98,17 @@ topologySpread:
 jobs:
   snmp-timeseries:
     enabled: true
-    schedule: "*/5 * * * *"
-    # SNMP is I/O-bound (threads mostly wait on the network), so we scale
-    # concurrency up for throughput without saturating the 16 cores. 8 shards x
-    # 10 threads = 80 concurrent SNMP threads (spread ~2/node across the 4
-    # m2.large workers via topologySpread), up from 8 x 8 = 64 on the old 6-core
-    # pool. Dial back if cycle_duration approaches the 240s deadline.
+    schedule: "*/2 * * * *"
+    # SNMP is I/O-bound (threads mostly wait on the network). Runs every 2 min so
+    # each device is sampled several times inside the 15-min Grafana window (dense
+    # sampling → smooth plots, robust to the query window). 8 shards x 16 threads
+    # = 128 concurrent (spread ~2/node across the 4 m2.large workers). RAM headroom
+    # is ample (~27%). NB the sweep was ~46s at 10 threads — well under the 2-min
+    # tick; concurrencyPolicy: Forbid skips a tick if one ever overruns.
     shards: 8 # per-device work → shardable; ~2 pods per worker node
-    threads: 10 # I/O-bound; 8 shards x 10 = 80 concurrent, sweep well under 5 min
+    threads: 16 # I/O-bound; 8 shards x 16 = 128 concurrent
     command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 240 # 80 concurrent I/O threads → fast sweep; fits the 5-min window
+    activeDeadlineSeconds: 110 # kill an overrun before the next */2 tick (fits a 2-min window)
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
