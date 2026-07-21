@@ -21,7 +21,7 @@ For the *quick* path, see [`../START-HERE.md`](../START-HERE.md). This file is t
    before every apply; pin a current one in `terraform.tfvars`.
 
 All three are now defaults/guards in `variables.tf` and checks in
-`scripts/start-here.sh`. This doc explains them.
+`scripts/bootstrap.sh` (`--check` runs them read-only). This doc explains them.
 
 ---
 

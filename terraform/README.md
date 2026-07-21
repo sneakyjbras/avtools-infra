@@ -1,7 +1,8 @@
 # Terraform — AV Tools Magnum cluster
 
 > Don't start here. Start with [`../START-HERE.md`](../START-HERE.md) →
-> `./scripts/start-here.sh`. It does the setup and checks below for you.
+> `./scripts/bootstrap.sh --check`. It does the checks below for you (and
+> `./scripts/bootstrap.sh` runs the whole apply end-to-end).
 
 Provisions the Kubernetes-on-OpenStack (Magnum) cluster in the **`av-tools`**
 OpenStack project: **1 master + 4 workers** (all `m2.large`), `cluster-autoscaler`
@@ -30,8 +31,8 @@ relies on for the autoscaler and `logging_producer` fluentd.
 
 ## Manual run
 
-`start-here.sh` is the supported path — it holds the nine `-backend-config` flags
-for the GitLab state backend. To init by hand, copy them out of that script.
+`./scripts/bootstrap.sh` is the supported path — it holds the nine `-backend-config`
+flags for the GitLab state backend. To init by hand, copy them out of that script.
 
 ```bash
 kinit <your-cern-username>@CERN.CH
@@ -101,8 +102,9 @@ Verify after: `kubectl get nodes -o wide` shows 4 workers, and
 - `merge_labels = true` keeps the template's labels and layers ours on top.
   `min/max_node_count` are derived in `main.tf` from `autoscale_min/max`, so the
   labels can't drift from the variables.
-- `terraform.tfvars` is gitignored (machine-specific); `start-here.sh` seeds it
-  from `terraform.tfvars.example`.
+- `terraform.tfvars` is gitignored (machine-specific); copy it yourself from
+  `terraform.tfvars.example` and set the rebuild target. `bootstrap.sh --check`
+  verifies it exists and matches the target (it does not seed it).
 - Keypairs belong to your **user**, not the project, and Terraform references
   them **by name** — the keypair must exist before apply. If the private half is
   lost, the entry is dead weight: delete and recreate it.

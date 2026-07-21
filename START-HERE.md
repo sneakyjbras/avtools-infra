@@ -3,12 +3,22 @@
 ```bash
 kinit <your-cern-username>@CERN.CH
 cp scripts/env.example.sh scripts/env.sh    # fill in 3 values
-./scripts/start-here.sh
+./scripts/bootstrap.sh --check              # read-only: check the whole chain
 ```
 
-The script checks the whole chain, stops at the first thing that isn't ready, and
+`--check` checks the whole chain, stops at the first thing that isn't ready, and
 prints the exact command to fix it. Fix, re-run, repeat. When it says **CLUSTER IS
-UP**, this layer is done.
+UP**, this layer is done. It changes nothing.
+
+Then, to build (or rebuild) the cluster end-to-end in one command:
+
+```bash
+./scripts/bootstrap.sh          # DESTRUCTIVE: replaces the cluster, then ArgoCD +
+                                # secrets + labels. See docs/deployment/bootstrap.md.
+```
+
+(`./scripts/start-here.sh` still works — it is now a thin shim for
+`./scripts/bootstrap.sh --check`.)
 
 You never need to read further to make it work. The rest is *why*, for when it
 surprises you.
@@ -38,7 +48,7 @@ the script refuses to skip ahead, and why "everything is broken" is almost alway
 
 | # | What | Done when | Who |
 |---|------|-----------|-----|
-| 1 | Tools installed | `start-here.sh` step 1 passes | `pacman` (sudo) |
+| 1 | Tools installed | `bootstrap.sh --check` step 1 passes | `pacman` (sudo) |
 | 2 | Your 3 values | `scripts/env.sh` filled in | you, once |
 | 3 | Kerberos ticket | `klist` shows `@CERN.CH` | `kinit`, daily |
 | 4 | Cluster | `terraform apply` → CREATE_COMPLETE | 10–20 min |
@@ -47,7 +57,8 @@ the script refuses to skip ahead, and why "everything is broken" is almost alway
 | 7 | Secrets | `scripts/sync-secret.sh` | from an itdcim/avtools host |
 | 8 | ArgoCD | `argocd/README.md` | after 6 and 7 |
 
-Steps 1–5 are done by `start-here.sh`. Step 6 is somebody's afternoon.
+`bootstrap.sh --check` verifies steps 1–5 (and `bootstrap.sh` performs 4–8 in one
+command). Step 6 (the container image) is somebody's afternoon in the `av-tools` repo.
 
 ## ⚠ The blocker above the cluster
 
@@ -67,7 +78,7 @@ just yields `ImagePullBackOff` on every CronJob.
 
 ## Summary: the things that bite
 
-Most are now enforced by `start-here.sh` or baked into `variables.tf` defaults
+Most are now enforced by `bootstrap.sh --check` or baked into `variables.tf` defaults
 rather than trusted to a reader.
 
 0. **The master must be `m2.large`, not the default `m2.medium`.** The single
@@ -127,6 +138,9 @@ worth a question to the CERN cloud team rather than more guessing.
 
 ## Reference
 
+- `scripts/bootstrap.sh` — **the single front door**: `--check` (read-only
+  preflight/orientation) and, with no flag, the one-command end-to-end rebuild
+- `docs/deployment/bootstrap.md` — the rebuild runbook + one-time tbag token setup
 - `docs/cluster-buildout-runbook.md` — **full post-mortem + debug playbook**:
   every failure we hit, its root cause, and how to diagnose a `CREATE_FAILED`
 - `scripts/os-auth.sh` — Kerberos → token bridge, and why it exists

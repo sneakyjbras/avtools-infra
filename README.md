@@ -2,7 +2,8 @@
 
 GitOps + infrastructure for **AV Tools** on CERN **Kubernetes-on-OpenStack (Magnum)**.
 
-### → New here? [**START-HERE.md**](START-HERE.md), then `./scripts/start-here.sh`
+### → New here? [**START-HERE.md**](START-HERE.md), then `./scripts/bootstrap.sh --check`
+### → Rebuild the cluster? `./scripts/bootstrap.sh` — see [**docs/deployment/bootstrap.md**](docs/deployment/bootstrap.md)
 ### → Build failing? [**docs/cluster-buildout-runbook.md**](docs/cluster-buildout-runbook.md) — post-mortem + debug playbook
 
 Application code lives in [`itdcim/av-tools`](https://gitlab.cern.ch/itdcim/av-tools);
@@ -13,7 +14,9 @@ this repo only **deploys** the container image that av-tools builds and publishe
 terraform/   Magnum cluster (1 master + 3 workers, autoscale 3–4, GitLab-managed state)
 chart/       Helm chart: 3 Indexed CronJobs + ConfigMap + (opt) Fluent Bit + freshness rule
 argocd/      AppProject + ApplicationSet (qa/prod) + app-of-apps + kube-prometheus-stack
-scripts/     start-here.sh   (the entry point: checks the chain, inits + plans)
+scripts/     bootstrap.sh    (the single front door: --check = read-only preflight;
+                              no flag = rebuild the whole cluster end-to-end)
+             start-here.sh   (backward-compat shim → bootstrap.sh --check)
              env.example.sh  (the 3 values you supply; copy to env.sh, gitignored)
              os-auth.sh      (Kerberos → scoped token for Terraform; and why)
              sync-secret.sh  (tbag → K8s Secret bridge; run from an itdcim/avtools host)
@@ -34,13 +37,17 @@ into git, and no per-release infra commit.
 
 ## Deploy
 
-0. **Everything below the app** — `./scripts/start-here.sh` (see
-   [`START-HERE.md`](START-HERE.md)). It walks the chain and stops wherever you are.
-1. **Cluster** — see [`terraform/README.md`](terraform/README.md).
-2. **Secrets** — `AVTOOLS_ENVIRONMENT=qa ./scripts/sync-secret.sh` from an
+0. **Orient** — `./scripts/bootstrap.sh --check` (see [`START-HERE.md`](START-HERE.md)).
+   Read-only; it walks the chain and stops wherever you are.
+1. **Whole thing, one command** — `./scripts/bootstrap.sh` rebuilds end-to-end
+   (cluster → ArgoCD → secrets → labels); see
+   [`docs/deployment/bootstrap.md`](docs/deployment/bootstrap.md). The individual
+   layers are still documented below and in their own READMEs:
+2. **Cluster** — see [`terraform/README.md`](terraform/README.md).
+3. **Secrets** — `AVTOOLS_ENVIRONMENT=qa ./scripts/sync-secret.sh` from an
    `itdcim/avtools` host (the monolith during the overlap). Secrets stay in tbag; this
    only bridges them into a K8s Secret ArgoCD never manages.
-3. **ArgoCD** — see [`argocd/README.md`](argocd/README.md): install ArgoCD, register this
+4. **ArgoCD** — see [`argocd/README.md`](argocd/README.md): install ArgoCD, register this
    repo, then `kubectl apply -n argocd -f argocd/app-of-apps.yaml`.
 
 > ⚠️ **Steps 2–3 are blocked**: `registry.cern.ch/avtools/avtools:{qa,prod}` does not

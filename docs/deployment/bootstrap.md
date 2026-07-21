@@ -8,10 +8,25 @@ kinit <your-cern-username>@CERN.CH
 ./scripts/bootstrap.sh
 ```
 
-It **orchestrates the existing pieces** — `start-here.sh` (preflight), `os-auth.sh`
-(Kerberos→token), Terraform (the cluster), `sync-secret.sh` (tbag→Secret), and the
-`argocd/` manifests. It does not reinvent any of them. This is the automated form
-of the manual steps in [`../cluster-buildout-runbook.md`](../cluster-buildout-runbook.md).
+It is the **single front door**. It **orchestrates the existing pieces** — its own
+`run_checks()` preflight chain (tools, env.sh, Kerberos, Keystone/project, template,
+quota, keypair, cluster), `os-auth.sh` (Kerberos→token), Terraform (the cluster),
+`sync-secret.sh` (tbag→Secret), and the `argocd/` manifests. It does not reinvent
+any of them. This is the automated form of the manual steps in
+[`../cluster-buildout-runbook.md`](../cluster-buildout-runbook.md).
+
+## Two modes
+
+```bash
+./scripts/bootstrap.sh --check   # read-only preflight/orientation; changes NOTHING;
+                                 #   exits non-zero if a check fails (scriptable)
+./scripts/bootstrap.sh           # rebuild the cluster end-to-end (DESTRUCTIVE)
+```
+
+`--check` is the orientation entry point — run it to see where the chain stands.
+It is exactly the preflight the normal run gates on (same `run_checks()`), so the
+two can never drift. `scripts/start-here.sh` is now a thin backward-compat shim
+that `exec`s `bootstrap.sh --check`.
 
 > **Destructive.** Applying the target topology forces a **full Magnum cluster
 > replace** — the running cluster (avtools-qa) is destroyed and rebuilt. The
@@ -35,7 +50,8 @@ autoscale_max = 4            # 4 + 4*4 = 20 cores, the exact quota
 ```
 
 You also need `scripts/env.sh` filled in (CERN_USER, GITLAB_ACCESS_TOKEN,
-PROJECT_ID) — `start-here.sh` seeds and checks it.
+PROJECT_ID) — `bootstrap.sh --check` verifies it (and `terraform.tfvars`; neither
+is auto-seeded — a fresh clone must `cp` the `.example` and fill it in).
 
 ---
 
@@ -79,6 +95,7 @@ app secrets are required; `sync-secret.sh` refuses to write an incomplete Secret
 
 | Flag               | Effect                                                                 |
 | ------------------ | --------------------------------------------------------------------- |
+| `--check`          | Read-only preflight/orientation — run the checks, change nothing, exit non-zero if any fails. The old `start-here.sh` behaviour.  |
 | `--yes` / `-y`     | Skip the typed `REBUILD` confirmation.                                 |
 | `--skip-terraform` | Leave the cluster untouched; only (re)bootstrap ArgoCD + secrets + labels on the EXISTING cluster. Skips the tfvars target check and the confirmation. |
 | `--help` / `-h`    | Usage.                                                                 |
@@ -90,9 +107,9 @@ running cluster (re-apply ArgoCD, re-sync secrets, re-label nodes).
 
 ## What it does, in order
 
-1. **Preflight** — runs `start-here.sh --check` (reuses the full chain: tools,
-   env.sh, Kerberos, Keystone/project, template exists, cores quota, keypair,
-   cluster status), then checks `kubectl`/`tbag` and that tfvars matches the target.
+1. **Preflight** — runs `run_checks()`, the same read-only chain `--check` runs
+   (tools incl. kubectl/tbag, env.sh, Kerberos, Keystone/project, template exists,
+   cores quota, keypair, cluster status, and that tfvars matches the rebuild target).
 2. **Confirm** — type `REBUILD` (skipped with `--yes` or `--skip-terraform`).
 3. **OpenStack auth** — `source scripts/os-auth.sh` (Kerberos → `OS_TOKEN`).
 4. **Terraform apply** — the topology change replaces the cluster (45–60 min).

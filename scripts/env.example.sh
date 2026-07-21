@@ -2,7 +2,7 @@
 #
 #   cp scripts/env.example.sh scripts/env.sh
 #   $EDITOR scripts/env.sh
-#   ./scripts/start-here.sh
+#   ./scripts/bootstrap.sh --check
 #
 # Three values. That is everything this project needs from a human.
 #
