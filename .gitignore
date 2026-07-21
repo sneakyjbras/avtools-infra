@@ -14,3 +14,6 @@ secrets/secret.yaml
 
 # Helm
 *.tgz
+
+# Kubeconfig written by scripts/bootstrap.sh (openstack coe cluster config)
+.kube/
