@@ -13,7 +13,7 @@ landb:
 # snmp sweep finishes inside the window.
 jobs:
   snmp-timeseries:
-    schedule: "*/5 * * * *"
+    schedule: "*/2 * * * *" # dense sampling under the 15-min Grafana gather (base is */2; this overlay is the operative value for qa)
   run-eam:
     schedule: "*/5 * * * *"
   run-landb:
