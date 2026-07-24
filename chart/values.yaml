@@ -107,8 +107,15 @@ jobs:
     # tick; concurrencyPolicy: Forbid skips a tick if one ever overruns.
     shards: 8 # per-device work → shardable; ~2 pods per worker node
     threads: 16 # I/O-bound; 8 shards x 16 = 128 concurrent
-    command: ["avtools", "--logs", "snmp-timeseries"]
-    activeDeadlineSeconds: 110 # kill an overrun before the next */2 tick (fits a 2-min window)
+    # Stagger the shard EXPORTS. All 8 shards start on the same */2 tick and finish
+    # ~together, so their OTLP/gRPC flushes hit MONIT as one concurrent burst — the
+    # confirmed cause of the ~1h ingestion gaps (egress probe: 30/30 TCP ok, so it's
+    # MONIT rejecting the burst, not the network). Per-shard startup sleep of
+    # index*3s spreads the finish/export over ~21s instead of one spike. (Pairs with
+    # the force_flush retry in av-tools >=1.9.1.)
+    command:
+      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries"]
+    activeDeadlineSeconds: 150 # room for the index*3s stagger + ~46s sweep + flush retries
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
