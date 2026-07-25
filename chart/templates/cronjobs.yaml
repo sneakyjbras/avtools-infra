@@ -66,6 +66,15 @@ spec:
                   value: {{ $job.shards | quote }}
                 - name: THREADS
                   value: {{ $job.threads | quote }}
+                {{- if $job.stableInstanceId }}
+                # Stable OTLP service.instance.id for single-pod jobs (run-eam /
+                # run-landb). Without it, gethostname() is the ephemeral pod name,
+                # which mints a new Mimir `instance` series every cycle. snmp does
+                # not need this — it derives a stable per-shard id from
+                # JOB_COMPLETION_INDEX (see av-tools _stable_instance_id).
+                - name: AVTOOLS_INSTANCE_ID
+                  value: {{ printf "avtools-%s-%s" $.Values.environment $name | quote }}
+                {{- end }}
                 {{- range $job.secretKeys }}
                 - name: {{ . }}
                   valueFrom:

@@ -126,6 +126,7 @@ jobs:
     shards: 1 # reconciliation sync — MUST stay 1 (was 4: 4x redundant, write contention)
     threads: 16 # single pod, I/O-bound; raised for reconciliation throughput
     command: ["avtools", "--logs", "run-eam"]
+    stableInstanceId: true # single pod -> pin a stable OTLP instance id (Mimir cardinality)
     activeDeadlineSeconds: 240
     backoffLimit: 1
     netRaw: false
@@ -136,6 +137,7 @@ jobs:
     shards: 1
     threads: 8 # single pod, I/O-bound; raised for throughput
     command: ["avtools", "--logs", "run-landb"]
+    stableInstanceId: true # single pod -> pin a stable OTLP instance id (Mimir cardinality)
     activeDeadlineSeconds: 180
     backoffLimit: 1
     netRaw: false
