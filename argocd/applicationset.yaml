@@ -10,11 +10,13 @@ spec:
     # PROD is promoted by fast-forwarding the `prod` branch to a release tag.
     - list:
         elements:
+          # QA soaks chart changes on the `qa` branch; promote to prod by merging
+          # `qa` -> `master` (which the prod element below tracks).
           - env: qa
             namespace: avtools-qa
-            targetRevision: master
-          # PROD runs on k8s from `master`, the same branch as QA; the only difference
-          # is the values-prod.yaml overlay (namespace, image tag, secrets). There is
+            targetRevision: qa
+          # PROD runs on k8s from `master`. The only difference from QA is the
+          # values-prod.yaml overlay (namespace, image tag, secrets). There is
           # no separate `prod` branch. Enable this element ONLY after:
           #   1. avtools-prod Secret present on the cluster (tbag bridge), and
           #   2. the Puppet monolith prod timers are stopped and verified dead
