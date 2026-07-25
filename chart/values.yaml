@@ -98,13 +98,14 @@ topologySpread:
 jobs:
   snmp-timeseries:
     enabled: true
-    schedule: "*/2 * * * *"
-    # SNMP is I/O-bound (threads mostly wait on the network). Runs every 2 min so
-    # each device is sampled several times inside the 15-min Grafana window (dense
-    # sampling → smooth plots, robust to the query window). 8 shards x 16 threads
-    # = 128 concurrent (spread ~2/node across the 4 m2.large workers). RAM headroom
-    # is ample (~27%). NB the sweep was ~46s at 10 threads — well under the 2-min
-    # tick; concurrencyPolicy: Forbid skips a tick if one ever overruns.
+    schedule: "*/5 * * * *"
+    # */5 (matches the Puppet VM's clean rate). SNMP is I/O-bound. We briefly ran
+    # */2 for finer resolution, but 8 shards x */2 pushed ~180k samples/hr to MONIT
+    # (2.5x the VM) and MONIT dropped the excess in regular ~1h blocks — a tenant
+    # ingestion limit, NOT a cluster problem (collection was perfect, gRPC export
+    # confirmed OK). */5 = ~72k samples/hr, matching the monolith VM which has zero
+    # gaps. The 15-min Grafana gather still gets ~3 samples/window so plots stay
+    # smooth. 8 shards x 16 threads; sweep ~46s; concurrencyPolicy: Forbid.
     shards: 8 # per-device work → shardable; ~2 pods per worker node
     threads: 16 # I/O-bound; 8 shards x 16 = 128 concurrent
     # Stagger the shard EXPORTS. All 8 shards start on the same */2 tick and finish

@@ -13,7 +13,7 @@ landb:
 # snmp sweep finishes inside the window.
 jobs:
   snmp-timeseries:
-    schedule: "*/2 * * * *" # dense sampling under the 15-min Grafana gather (base is */2; this overlay is the operative value for qa)
+    schedule: "*/5 * * * *" # */2 pushed ~180k samples/hr (8 streams) and MONIT dropped the excess in ~1h blocks; */5 matches the Puppet VM's clean ~72k/hr rate. 15-min Grafana gather still gets ~3 samples/window, so plots stay smooth.
   run-eam:
     schedule: "*/5 * * * *"
   run-landb:
