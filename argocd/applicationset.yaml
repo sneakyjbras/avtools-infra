@@ -13,14 +13,16 @@ spec:
           - env: qa
             namespace: avtools-qa
             targetRevision: master
-          # PROD is LIVE on k8s as of the 2026-07 cutover. `prod` was fast-forwarded
-          # to master's chart (image registry.cern.ch/avtools/avtools:prod, */5), the
-          # avtools-prod Secrets were created, and the Puppet monolith prod timers were
-          # stopped in the same window (shared prod DB → never both at once). Promote a
-          # new prod release by fast-forwarding the `prod` branch.
-          - env: prod
-            namespace: avtools-prod
-            targetRevision: prod
+          # PROD DISABLED AGAIN (emergency back-out). !11 re-enabled this while the
+          # Puppet monolith was STILL running (its monolith-off puppet MR !499 was
+          # blocked on CI), so k8s-prod and the monolith both polled/wrote the shared
+          # prod DB — a double-write. Re-disabled to return to monolith-only. Do the
+          # real cutover DELIBERATELY: bring `prod` up to master, re-create the
+          # avtools-prod Secrets on the current cluster, then re-enable this element
+          # AND stop the monolith timers (MR !499) in the SAME window.
+          # - env: prod
+          #   namespace: avtools-prod
+          #   targetRevision: prod
   template:
     metadata:
       name: 'avtools-{{.env}}'
