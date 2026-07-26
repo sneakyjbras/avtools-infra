@@ -142,6 +142,24 @@ jobs:
     backoffLimit: 1
     netRaw: false
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD", "LANDB_CLIENT_SECRET"]
+  # sync-rooms recomputes the device->room mapping from Postgres alone: it reads
+  # eam_devices/eam_positions (populated by run-eam) and diff-writes the derived
+  # table, so it depends on run-eam having populated that cache first. Same
+  # cadence or a slight offset from run-eam is fine either way — concurrencyPolicy:
+  # Forbid (template) only prevents THIS job from overlapping itself, so a
+  # same-tick schedule just means sync-rooms reads whatever run-eam last
+  # committed, not a torn read.
+  sync-rooms:
+    enabled: true
+    schedule: "*/15 * * * *" # 15min-hourly requested; */15 is most responsive. Tunable up to "0 * * * *".
+    shards: 1 # reconciliation over the whole cache; MUST stay 1 (global view), like run-eam/run-landb
+    threads: 1 # not threaded; the resolver is in-memory
+    command: ["avtools", "--logs", "sync-rooms"]
+    stableInstanceId: true # single pod -> pin a stable OTLP instance id (Mimir cardinality), like run-eam
+    activeDeadlineSeconds: 120 # loads eam_devices + eam_positions, climbs in memory, diff-writes — fast
+    backoffLimit: 1
+    netRaw: false # no ICMP/raw sockets
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"] # DB + heartbeat only; NO EAM/LanDB creds (reads Postgres cache)
 
 # ---------------------------------------------------------------------------
 # Recovery watchdog (AP layer 4): alert when a CronJob hasn't succeeded within
