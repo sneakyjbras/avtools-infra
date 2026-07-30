@@ -30,9 +30,14 @@ spec:
           serviceAccountName: {{ include "avtools.serviceAccountName" $ }}
           automountServiceAccountToken: false
           {{- if $.Values.topologySpread.enabled }}
-          # Spread same-component pods one-per-node so snmp-timeseries' shards
-          # land one per worker node instead of stacking on a single 2-core box.
-          # Soft (ScheduleAnyway) so a down/cordoned node never blocks the tick.
+          # Spread same-component pods one-per-node so a sharded tier's own pods
+          # (e.g. snmp-critical's 8 shards) land one per worker node instead of
+          # stacking on a single box. Soft (ScheduleAnyway) so a down/cordoned
+          # node never blocks the tick. This only spreads a single job's OWN
+          # shards across nodes; with 4 snmp-* tiers now on independent
+          # schedules, what keeps CROSS-job concurrent pod count sane is the
+          # minute-offset schedule stagger in values.yaml (`jobs:` comment),
+          # not this per-job topology setting.
           topologySpreadConstraints:
             - maxSkew: {{ $.Values.topologySpread.maxSkew | default 1 }}
               topologyKey: kubernetes.io/hostname
