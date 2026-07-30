@@ -9,11 +9,19 @@ eam:
 landb:
   clientId: av-tools-qa
 
-# 5-min cadence: matches the Grafana 5-min interval/gather; the 48-thread (6x8)
-# snmp sweep finishes inside the window.
+# Schedules just mirror the base chart's tiered stagger (see chart/values.yaml
+# `jobs:` comment for the full offset rationale) — QA runs the same cadence as
+# PROD on purpose so tier behavior/publish-filter is validated at real cadence
+# before promotion, not just relative timing.
 jobs:
-  snmp-timeseries:
+  snmp-critical:
     schedule: "*/5 * * * *" # */2 pushed ~180k samples/hr (8 streams) and MONIT dropped the excess in ~1h blocks; */5 matches the Puppet VM's clean ~72k/hr rate. 15-min Grafana gather still gets ~3 samples/window, so plots stay smooth.
+  snmp-high:
+    schedule: "3-59/15 * * * *"
+  snmp-medium:
+    schedule: "7 * * * *"
+  snmp-low:
+    schedule: "11 */6 * * *"
   run-eam:
     schedule: "*/5 * * * *"
   run-landb:
