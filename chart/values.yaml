@@ -65,12 +65,19 @@ resources:
 # ---------------------------------------------------------------------------
 # Node partitioning. The worker pool is 4 nodes x 4 cores = 16 cores (2026-07
 # rescale: 4x m2.large, up from 3x m2.medium). Spread the same-component pods
-# evenly across nodes so the shardable job (snmp-timeseries: 8 shards) lands
-# ~2 pods per worker node instead of piling several shards onto one box and
-# starving another. maxSkew 1 keeps the per-node count within 1 of even (8
-# shards / 4 nodes = 2/node). Soft (ScheduleAnyway) so a cordoned/down node never
-# blocks the tick — it just co-locates until the node returns. No-op for the
-# single-pod reconciliation jobs (run-eam / run-landb).
+# evenly across nodes so a shardable tier's shards land spread across workers
+# instead of piling onto one box and starving another (e.g. snmp-critical:
+# 8 shards -> ~2 pods/node). maxSkew 1 keeps the per-node count within 1 of
+# even. Soft (ScheduleAnyway) so a cordoned/down node never blocks the tick —
+# it just co-locates until the node returns. No-op for the single-pod
+# reconciliation jobs (run-eam / run-landb / sync-rooms).
+#
+# Note: with 4 independently-scheduled snmp-* tiers below, this setting only
+# spreads ONE tier's own shards across nodes once that tier is firing — it
+# does NOT stop two different jobs (e.g. snmp-high and run-eam) from firing
+# in the same tick and stacking pods cluster-wide. That cross-job problem is
+# handled by the minute-offset schedule stagger (see comment on `jobs:`
+# below), not by topologySpread.
 # ---------------------------------------------------------------------------
 topologySpread:
   enabled: true
@@ -78,45 +85,147 @@ topologySpread:
   whenUnsatisfiable: ScheduleAnyway
 
 # ---------------------------------------------------------------------------
-# The three batch services. shards == completions == parallelism == SHARD_TOTAL.
+# Batch services. shards == completions == parallelism == SHARD_TOTAL.
 # Sharding is crc32(equipment_no) % SHARD_TOTAL == JOB_COMPLETION_INDEX.
 #
-# ONLY snmp-timeseries is shardable. It does per-device work (SNMP poll one
-# device, write that device's rows), so partitioning the device list across N
-# pods is safe: disjoint devices => disjoint reads and disjoint DB writes.
+# snmp-critical / snmp-high / snmp-medium / snmp-low (2026-07) replace the
+# single snmp-timeseries job with a PUBLISH-FILTER tier split: `avtools
+# snmp-timeseries --priority {critical,high,medium,low}` still does a FULL
+# fleet sweep every run (collects everything, same as before) and only
+# PUBLISHES that tier's series to MONIT. Phase 1 of the fix — it trades spare,
+# I/O-bound/low-CPU SNMP+ping capacity (cheap, we have headroom) to cut the
+# scarce MONIT OTLP ingest rate (the actual bottleneck) by publishing
+# less-urgent metrics less often. Because every tier still does per-device
+# work (SNMP poll one device, write that device's rows) over the WHOLE fleet,
+# all four are shardable the same way snmp-timeseries was: disjoint devices
+# => disjoint reads and disjoint DB writes.
 #
-# run-eam and run-landb are bulk RECONCILIATION syncs: each fetches the ENTIRE
-# EAM/LanDB inventory, diffs it against Postgres, and upserts. The app code does
-# NOT shard them (run_eam/run_landb take no shard params) — and it shouldn't:
-# reconciliation needs the GLOBAL view to detect stale/orphaned rows, which a
-# shard that sees only its slice cannot do safely. So they MUST be shards: 1.
-# Setting shards > 1 here just runs N identical full syncs that fight over the
-# same rows (contention, wasted DB load, lost updates) — it does not speed
-# anything up. (If EAM reconciliation ever outgrows one pod, the fix is real
-# shard-aware reconciliation in the app, not more copies of the whole sync.)
+# avtools auto-adds a `tier` label (from --priority) to the cycle-guardrail
+# metrics — no chart-side label plumbing needed — so the Grafana SLO alerts
+# can `group by (tier)` across these four jobs.
+#
+# Schedule stagger — naively */5, */15, hourly and every-6h all fire at
+# minute :00 (top of hour), colliding with EACH OTHER and with the existing
+# run-eam/run-landb (*/5) and sync-rooms (*/15). concurrencyPolicy: Forbid
+# only stops a job overlapping ITSELF, not cross-job — and a concurrent OTLP
+# flush burst across jobs is the confirmed cause of past MONIT ingest gaps
+# (and it spikes node pod count). So each tier below gets its own minute
+# offset:
+#   snmp-critical  */5            -> :00,:05,:10,...,:55
+#   snmp-high      3-59/15        -> :03,:18,:33,:48
+#   snmp-medium    7 * * * *      -> :07 hourly
+#   snmp-low       11 */6 * * *   -> :11 every 6h (00:11/06:11/12:11/18:11)
+# 3/7/11 are never multiples of 5, so high/medium/low never land on a
+# snmp-critical/run-eam/run-landb (*/5) tick, and 3/7/11 also miss the
+# sync-rooms */15 grid (:00/:15/:30/:45) — high/medium/low never collide with
+# ANY other job in this chart. snmp-critical keeps the *unstaggered* */5
+# offset the old snmp-timeseries already used, so it still coincides with
+# run-eam/run-landb (also */5) and, quarter-hourly, sync-rooms — that overlap
+# is pre-existing, not a regression, and freshness matters most for the
+# critical tier so it isn't worth moving off the clean */5 boundary. Net
+# effect: at most one snmp-* tier is ever running alongside run-eam+run-landb
+# (+ sync-rooms on the quarter-hour), never two snmp-* tiers at once.
+#
+# run-eam, run-landb and sync-rooms are bulk RECONCILIATION syncs: each
+# fetches an ENTIRE inventory/cache, diffs it against Postgres, and upserts.
+# The app code does NOT shard them — and it shouldn't: reconciliation needs
+# the GLOBAL view to detect stale/orphaned rows, which a shard that sees only
+# its slice cannot do safely. So they MUST be shards: 1. Setting shards > 1
+# here just runs N identical full syncs that fight over the same rows
+# (contention, wasted DB load, lost updates) — it does not speed anything up.
+# (If EAM reconciliation ever outgrows one pod, the fix is real shard-aware
+# reconciliation in the app, not more copies of the whole sync.)
 # ---------------------------------------------------------------------------
 jobs:
-  snmp-timeseries:
+  snmp-critical:
     enabled: true
     schedule: "*/5 * * * *"
-    # */5 (matches the Puppet VM's clean rate). SNMP is I/O-bound. We briefly ran
-    # */2 for finer resolution, but 8 shards x */2 pushed ~180k samples/hr to MONIT
-    # (2.5x the VM) and MONIT dropped the excess in regular ~1h blocks — a tenant
+    # Unstaggered */5 — same cadence/offset as the old snmp-timeseries (matches
+    # the Puppet VM's clean rate; see stagger comment above for why it's the one
+    # tier left on the plain */5 grid). SNMP is I/O-bound. We briefly ran */2 for
+    # finer resolution, but 8 shards x */2 pushed ~180k samples/hr to MONIT (2.5x
+    # the VM) and MONIT dropped the excess in regular ~1h blocks — a tenant
     # ingestion limit, NOT a cluster problem (collection was perfect, gRPC export
     # confirmed OK). */5 = ~72k samples/hr, matching the monolith VM which has zero
     # gaps. The 15-min Grafana gather still gets ~3 samples/window so plots stay
-    # smooth. 8 shards x 16 threads; sweep ~46s; concurrencyPolicy: Forbid.
+    # smooth.
+    # Mirrors today's snmp-timeseries exactly (NOT a placeholder): most frequent
+    # tier, needs the fastest sweep for freshness. 8 shards x 16 threads; sweep
+    # ~46s; concurrencyPolicy: Forbid.
     shards: 8 # per-device work → shardable; ~2 pods per worker node
     threads: 16 # I/O-bound; 8 shards x 16 = 128 concurrent
-    # Stagger the shard EXPORTS. All 8 shards start on the same */2 tick and finish
+    # Stagger the shard EXPORTS. All 8 shards start on the same tick and finish
     # ~together, so their OTLP/gRPC flushes hit MONIT as one concurrent burst — the
     # confirmed cause of the ~1h ingestion gaps (egress probe: 30/30 TCP ok, so it's
     # MONIT rejecting the burst, not the network). Per-shard startup sleep of
     # index*3s spreads the finish/export over ~21s instead of one spike. (Pairs with
-    # the force_flush retry in av-tools >=1.9.1.)
+    # the force_flush retry in av-tools >=1.9.1.) Same formula on every tier below.
     command:
-      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries"]
-    activeDeadlineSeconds: 150 # room for the index*3s stagger + ~46s sweep + flush retries
+      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries --priority critical"]
+    activeDeadlineSeconds: 150 # unchanged: room for the index*3s stagger + ~46s sweep + flush retries
+    backoffLimit: 1
+    netRaw: true # ICMP ping needs CAP_NET_RAW
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
+  snmp-high:
+    enabled: true
+    schedule: "3-59/15 * * * *" # :03,:18,:33,:48 — offset stagger, see `jobs:` comment above
+    # PLACEHOLDER shards/threads: not latency-critical (15-min tier), so smaller
+    # than critical by design. TBD from the pending G0 cardinality measurement +
+    # observed per-tier sweep time — do not treat these as tuned values.
+    shards: 4
+    threads: 16
+    command:
+      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries --priority high"]
+    # PLACEHOLDER: 4 shards (half of critical's 8) sweeping the same full fleet
+    # implies roughly ~2x critical's per-shard sweep time; scaled up from
+    # critical's 150s accordingly. Revisit once real G0 timing data lands.
+    activeDeadlineSeconds: 220
+    backoffLimit: 1
+    netRaw: true # ICMP ping needs CAP_NET_RAW
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
+  snmp-medium:
+    enabled: true
+    schedule: "7 * * * *" # :07 hourly — offset stagger, see `jobs:` comment above
+    # PLACEHOLDER shards/threads: hourly tier, so lower concurrency than high is
+    # acceptable. TBD from the pending G0 cardinality measurement + observed
+    # per-tier sweep time — do not treat these as tuned values.
+    shards: 4
+    threads: 8
+    command:
+      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries --priority medium"]
+    # PLACEHOLDER: same shard count as high but half the threads (8 vs 16), so
+    # roughly ~2x high's sweep time; scaled up accordingly. Hourly cadence gives
+    # ample headroom either way. Revisit once real G0 timing data lands.
+    activeDeadlineSeconds: 320
+    backoffLimit: 1
+    netRaw: true # ICMP ping needs CAP_NET_RAW
+    secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]
+  snmp-low:
+    enabled: true
+    schedule: "11 */6 * * *" # :11 every 6h (00:11/06:11/12:11/18:11) — offset stagger, see `jobs:` comment above
+    # Lowest-urgency tier (6h cadence), so the smallest footprint of the four:
+    # 2x8 = 16 concurrent threads, vs critical 128 / high 64 / medium 32.
+    #
+    # threads was 4 and is now 8. At 4 threads this tier put 1375/2/4 = 172
+    # devices on every thread — 16x the per-thread load of critical, which is
+    # MEASURED at ~40s for 10.7 devices/thread (8x16, prod 2026-07-30). Scaling
+    # that linearly (the sweep is I/O-bound, so per-thread device count is the
+    # driver) puts a 4-thread sweep at ~640s — PAST its own 600s
+    # activeDeadlineSeconds, i.e. killed mid-sweep every time. At 8 threads the
+    # per-thread load halves to 86 devices (~320s projected), which fits the
+    # raised 1200s deadline with the same ~2-4x headroom the other three tiers
+    # have. 8 is also well under the 16 threads/shard already proven safe by
+    # critical, so this adds no over-concurrency risk.
+    shards: 2
+    threads: 8
+    command:
+      ["sh", "-c", "sleep $(( ${JOB_COMPLETION_INDEX:-0} * 3 )); exec avtools --logs snmp-timeseries --priority low"]
+    # Fewest shards AND fewest threads of the four tiers, so still by far the
+    # longest per-pod sweep (~320s projected at 2x8). 1200s is ~4x that, which
+    # is generous on purpose: the 6h cadence means a slow sweep costs nothing,
+    # whereas a deadline kill loses the whole tier's publish for 6 hours.
+    # activeDeadlineSeconds is a runaway kill-switch, not a latency target.
+    activeDeadlineSeconds: 1200
     backoffLimit: 1
     netRaw: true # ICMP ping needs CAP_NET_RAW
     secretKeys: ["DATABASE_URL", "MONIT_PASSWORD"]

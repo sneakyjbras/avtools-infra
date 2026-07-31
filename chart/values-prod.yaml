@@ -9,11 +9,17 @@ eam:
 landb:
   clientId: av-tools
 
-# 5-min cadence: matches the Grafana 5-min interval/gather; the 48-thread (6x8)
-# snmp sweep finishes inside the window.
+# Schedules just mirror the base chart's tiered stagger (see chart/values.yaml
+# `jobs:` comment for the full offset rationale).
 jobs:
-  snmp-timeseries:
+  snmp-critical:
     schedule: "*/5 * * * *"
+  snmp-high:
+    schedule: "3-59/15 * * * *"
+  snmp-medium:
+    schedule: "7 * * * *"
+  snmp-low:
+    schedule: "11 */6 * * *"
   run-eam:
     schedule: "*/5 * * * *"
   run-landb:
