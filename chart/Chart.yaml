@@ -4,7 +4,8 @@ description: >-
   AV Tools sharded SNMP/ping sweep on CERN Kubernetes (Magnum) — batch
   services (the tiered snmp-critical/snmp-high/snmp-medium/snmp-low
   publish-filter sweep, run-eam, run-landb, sync-rooms) as Indexed CronJobs,
-  plus an optional Fluent Bit log shipper to CERN MonIT OpenSearch.
+  plus an optional Fluent Bit Kubernetes Events shipper to CERN MonIT
+  OpenSearch.
 type: application
 version: 0.3.0
 appVersion: "1.11.1"

@@ -1,39 +1,84 @@
 {{- if .Values.fluentBit.enabled }}
+{{- $fbName := printf "%s-fluent-bit" (include "avtools.fullname" .) }}
+{{- $caCmName := .Values.fluentBit.caBundle.configMapName | default (printf "%s-ca" $fbName) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "avtools.fullname" . }}-fluent-bit
+  name: {{ $fbName }}
   labels: {{- include "avtools.labels" . | nindent 4 }}
     app.kubernetes.io/component: fluent-bit
+# NOTE: automountServiceAccountToken is intentionally left at its default
+# (true) here, unlike the CronJob ServiceAccount (serviceaccount.yaml), which
+# disables it because those pods inject credentials explicitly via env vars.
+# The kubernetes_events input authenticates to the API server using the
+# pod's own projected token at its default path
+# (/var/run/secrets/kubernetes.io/serviceaccount/token) — no in-cluster
+# kube_token_file override needed.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+# Namespaced Role, not ClusterRole: kubernetes_events is scoped to this
+# release's namespace (Kube_Namespace below), which only ever queries the
+# namespaced collection endpoint (/api/v1/namespaces/<ns>/events) — a Role +
+# RoleBinding in that one namespace is sufficient RBAC and strictly
+# least-privilege compared to a cluster-wide grant. This replaces the old
+# ClusterRole, which existed for the retired `kubernetes` FILTER plugin's pod
+# metadata enrichment (pods/namespaces get/list/watch) — that filter is gone
+# along with the tail input, so that grant is dropped entirely.
+kind: Role
 metadata:
-  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+  name: {{ $fbName }}
+  namespace: {{ .Release.Namespace }}
   labels: {{- include "avtools.labels" . | nindent 4 }}
 rules:
+  # kubernetes_events (fluent-bit 3.1.9) only calls the core v1 Events API
+  # (/api/v1/events, /api/v1/namespaces/<ns>/events — confirmed by reading
+  # plugins/in_kubernetes_events/kubernetes_events_conf.h at tag v3.1.9), so
+  # apiGroups: [""] is what's strictly exercised. events.k8s.io is granted
+  # defensively for the same object under its newer API group/representation
+  # (read-only verbs only, so no privilege escalation risk either way).
   - apiGroups: [""]
-    resources: ["pods", "namespaces"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+  name: {{ $fbName }}
+  namespace: {{ .Release.Namespace }}
   labels: {{- include "avtools.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ include "avtools.fullname" . }}-fluent-bit-{{ .Release.Namespace }}
+  kind: Role
+  name: {{ $fbName }}
 subjects:
   - kind: ServiceAccount
-    name: {{ include "avtools.fullname" . }}-fluent-bit
+    name: {{ $fbName }}
     namespace: {{ .Release.Namespace }}
 ---
+{{- if not .Values.fluentBit.caBundle.configMapName }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "avtools.fullname" . }}-fluent-bit
+  name: {{ $caCmName }}
+  labels: {{- include "avtools.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fluent-bit
+# CERN Grid Certification Authority (intermediate) + CERN Root Certification
+# Authority 2 — both public CA certificates, safe to commit. Verified live
+# (2026-07-31): monit-otlp.cern.ch:4319 needs this FULL chain; the root
+# alone, and the Debian default trust store, both fail TLS verification —
+# the server does not send its own intermediate.
+data:
+  {{ .Values.fluentBit.caBundle.key }}: |
+{{ .Files.Get "files/cern-chain.pem" | trimSuffix "\n" | indent 4 }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fbName }}
   labels: {{- include "avtools.labels" . | nindent 4 }}
     app.kubernetes.io/component: fluent-bit
 data:
@@ -42,59 +87,104 @@ data:
         Flush        5
         Daemon       Off
         Log_Level    info
-        Parsers_File parsers.conf
 
     [INPUT]
-        Name              tail
-        # Only this namespace's avtools pods (both envs run in separate namespaces).
-        Path              /var/log/containers/*_{{ .Release.Namespace }}_*.log
-        multiline.parser  cri
-        Tag               kube.*
-        Mem_Buf_Limit     10MB
-        Skip_Long_Lines   On
+        # Kubernetes Event objects (pod kills/OOM/evictions/ImagePullBackOff/
+        # failed Jobs/ArgoCD syncs), read from the API server — NOT container
+        # stdout. Confirmed against the pinned cr.fluentbit.io/fluent/fluent-bit
+        # image tag 3.1.9 (git commit 431fa79ae27edaef8d050a7af6f038f4400193a1):
+        # `kubernetes_events` is registered ("Inputs" list in --help) and its
+        # config_map option names below (kube_namespace, kube_retention_time,
+        # db, db.sync, tls.*) were cross-checked both against the upstream
+        # v3.1.9 source (plugins/in_kubernetes_events/kubernetes_events.c) and
+        # via `strings` on the actual binary extracted from this image.
+        #
+        # Deliberately NOT a `tail` input: (a) CERN's own cern-magnum-fluentd
+        # DaemonSet already tails /var/log/containers/*.log on every node and
+        # ships to central MonIT — a namespace-scoped tail here would
+        # duplicate it; (b) avtools container stdout is ANSI-coloured console
+        # text, not JSON, so tailing it is unparseable. Application logs ship
+        # separately via direct OTLP from the avtools process, not through
+        # this shipper.
+        Name                 kubernetes_events
+        Tag                  k8s_events
+        # Scope to this release's own namespace: two independent releases
+        # (avtools-qa, avtools-prod) each run their own single-replica
+        # instance of this input, so an unscoped (cluster-wide) query would
+        # have every release double-collect the other's events. Kube_URL,
+        # Kube_Token_File and Kube_CA_File are left at their defaults
+        # (in-cluster API + the pod's own projected serviceaccount token/CA),
+        # which just work because ServiceAccount auto-mount is left enabled.
+        Kube_Namespace       {{ .Release.Namespace }}
+        # Persist last-seen resourceVersion + delivered UIDs across container
+        # restarts (crash/OOM of the fluent-bit process itself) so a restart
+        # doesn't re-ship every event still inside Kube_Retention_Time
+        # (default 1h). Backed by the `state` emptyDir below. Note this only
+        # survives same-pod container restarts, not a full pod reschedule —
+        # an emptyDir doesn't follow the pod to a new node — so occasional
+        # duplicate delivery after a redeploy is still possible and is
+        # considered an acceptable tradeoff (harmless duplicate documents),
+        # not a correctness requirement.
+        DB                   /var/lib/fluent-bit/k8s_events.db
 
     [FILTER]
-        Name                kubernetes
-        Match               kube.*
-        Merge_Log           On
-        Keep_Log            Off
-        K8S-Logging.Parser  On
-        K8S-Logging.Exclude On
-
-    [FILTER]
-        # Distinguish k8s stream from the monolith during the migration overlap.
+        # Flat resource-identifying fields so events are filterable in
+        # OpenSearch alongside application logs sharing the same
+        # monit-logs-ss4o_avtools index. service.name reuses the exact same
+        # value the app's own OTLP export uses (config.OTEL_SERVICE_NAME) so
+        # both pipelines agree on one identity.
         Name    modify
-        Match   kube.*
-        Add     source k8s
-        Add     submitter_environment {{ .Values.environment }}
+        Match   k8s_events
+        Add     service.name           {{ .Values.config.OTEL_SERVICE_NAME }}
+        Add     deployment.environment {{ .Values.environment }}
+        Add     k8s.namespace.name     {{ .Release.Namespace }}
 
     [OUTPUT]
-        Name          opentelemetry
-        Match         kube.*
-        Host          {{ .Values.fluentBit.logsEndpointHost }}
-        Port          {{ .Values.fluentBit.logsEndpointPort }}
-        Logs_uri      {{ .Values.fluentBit.logsUri }}
-        Tls           On
-        Tls.verify    On
-        # TODO(verify): confirm the MonIT OTLP/logs auth scheme + attribute mapping
-        # (SNOW to MonIT, see AVTOOLS-OPENSEARCH.md §6). tenant header + basic auth
-        # from the bridged AVTOOLS_LOGS_PWD is the working assumption.
-        Header        tenant_id {{ .Values.fluentBit.tenant }}
-        http_user     {{ .Values.fluentBit.tenant }}
-        http_passwd   ${AVTOOLS_LOGS_PWD}
-  parsers.conf: |
-    [PARSER]
-        Name   cri
-        Format regex
-        Regex  ^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<message>.*)$
+        # OTLP/HTTP logs -> CERN MonIT OpenSearch. :4319 is the only
+        # TLS-capable OTLP port (verified live, TLSv1.3); :4318 is identical
+        # but plaintext and :4316/:4317 (gRPC) support no TLS at all and
+        # return UNAVAILABLE for logs — HTTP/:4319 is the only viable
+        # transport. Index: monit-logs-ss4o_avtools (the older
+        # otel-logs_avtools name once documented in this repo was wrong).
+        Name                      opentelemetry
+        Match                     k8s_events
+        Host                      {{ .Values.fluentBit.logsEndpointHost }}
+        Port                      {{ .Values.fluentBit.logsEndpointPort }}
+        Logs_uri                  {{ .Values.fluentBit.logsUri }}
+        Tls                       On
+        Tls.verify                On
+        Tls.ca_file               {{ .Values.fluentBit.caBundle.mountPath }}/{{ .Values.fluentBit.caBundle.key }}
+        # Same credential the metrics path uses (MonIT confirmed: same OTLP
+        # endpoint, same password) — sourced from the existing avtools-secrets
+        # Secret via the MONIT_PASSWORD env var below, never templated here.
+        # The tenant_id header is optional (Basic auth alone is verified
+        # sufficient), so it's intentionally omitted to keep this lean.
+        http_user                 {{ .Values.fluentBit.tenant }}
+        http_passwd               ${MONIT_PASSWORD}
+        # Use the Event's own human-readable message as the OTLP log Body
+        # (e.g. "Back-off restarting failed container"), and carry every
+        # other field (reason, type, involvedObject, count, ...) as
+        # Attributes instead of dropping them.
+        Logs_body_key             message
+        Logs_body_key_attributes  On
 ---
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
-  name: {{ include "avtools.fullname" . }}-fluent-bit
+  name: {{ $fbName }}
   labels: {{- include "avtools.labels" . | nindent 4 }}
     app.kubernetes.io/component: fluent-bit
 spec:
+  # kubernetes_events reads the API server, not per-node log files — unlike
+  # the retired tail input, there's nothing node-local to collect, so one
+  # replica sees every event in the namespace. A DaemonSet here would run one
+  # watch per node and ship every event N times (N = node count); Deployment
+  # + replicas: 1 is the correct shape.
+  replicas: 1
+  strategy:
+    # Avoid two replicas briefly overlapping (and double-shipping the same
+    # events) during a rolling update of this single-replica Deployment.
+    type: Recreate
   selector:
     matchLabels: {{- include "avtools.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: fluent-bit
@@ -103,30 +193,45 @@ spec:
       labels: {{- include "avtools.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: fluent-bit
     spec:
-      serviceAccountName: {{ include "avtools.fullname" . }}-fluent-bit
-      tolerations:
-        - operator: Exists
+      serviceAccountName: {{ $fbName }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: fluent-bit
           image: {{ .Values.fluentBit.image }}
           env:
-            - name: AVTOOLS_LOGS_PWD
+            - name: MONIT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secretName }}
-                  key: AVTOOLS_LOGS_PWD
+                  key: MONIT_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           resources: {{- toYaml .Values.fluentBit.resources | nindent 12 }}
           volumeMounts:
-            - name: varlog
-              mountPath: /var/log
-              readOnly: true
             - name: config
               mountPath: /fluent-bit/etc/
+            - name: ca-bundle
+              mountPath: {{ .Values.fluentBit.caBundle.mountPath }}
+              readOnly: true
+            # Writable path for the DB= state file above; the rest of the
+            # root filesystem stays read-only.
+            - name: state
+              mountPath: /var/lib/fluent-bit
       volumes:
-        - name: varlog
-          hostPath:
-            path: /var/log
         - name: config
           configMap:
-            name: {{ include "avtools.fullname" . }}-fluent-bit
+            name: {{ $fbName }}
+        - name: ca-bundle
+          configMap:
+            name: {{ $caCmName }}
+        - name: state
+          emptyDir: {}
 {{- end }}
