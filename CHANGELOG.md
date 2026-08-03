@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Fluent Bit retargeted from container-log tailing to Kubernetes Event collection.** The `chart/templates/fluent-bit.yaml` shipper (still disabled by default) previously guessed a `tail` INPUT over `/var/log/containers/*_<namespace>_*.log`, written before MonIT confirmed the transport. Two things ruled that design out: CERN's own `cern-magnum-fluentd` DaemonSet already tails every node's container logs to central MonIT (a duplicate collector), and avtools' own stdout is ANSI-coloured console text, not JSON, so tailing it would ship nothing parseable anyway. Application logs are unaffected — they ship as their own direct-OTLP pipeline from the avtools process, not through this shipper. This chart's Fluent Bit now collects **Kubernetes Event objects** instead (pod deadline kills, OOM kills, `ImagePullBackOff`, evictions, failed Jobs, ArgoCD syncs) via the `kubernetes_events` input, verified against the pinned `cr.fluentbit.io/fluent/fluent-bit:3.1.9` image (source at tag `v3.1.9` + `strings` on the extracted binary).
+- **DaemonSet → Deployment (`replicas: 1`).** `kubernetes_events` polls/watches the API server rather than per-node log files, so a single pod already sees every event in the namespace; the old DaemonSet shape would have shipped every event once per node (5×).
+- **RBAC narrowed:** the `ClusterRole` (originally `pods`/`namespaces` `get/list/watch`, for the retired `kubernetes` FILTER plugin's log enrichment) is replaced by a namespaced `Role`/`RoleBinding` granting `get/list/watch` on `events` (`""`) and `events.k8s.io`, scoped to the release's own namespace — least privilege, since `Kube_Namespace` scoping means the plugin only ever queries the namespaced Events endpoint.
+- **Output fixed to the verified transport:** OTLP/HTTP to `monit-otlp.cern.ch:4319` (the only TLS-capable OTLP port; the gRPC ports support no TLS at all, and :4318 is the same endpoint in plaintext) with the CERN Grid CA chain — now bundled at `chart/files/cern-chain.pem` (both public CA certificates) and mounted via a configurable ConfigMap/path/key (`fluentBit.caBundle`), rather than disabling TLS verification. Removed the stale `TODO(verify)` markers.
+- **Credential fixed:** the separate `AVTOOLS_LOGS_PWD` / `avtools_logs_pwd` key is retired from the chart, `secrets/secret.example.yaml`, and `scripts/sync-secret.sh` — MonIT confirmed logs and metrics share the same OTLP endpoint and password, so the existing `MONIT_PASSWORD` secret key (already used by every CronJob) is reused instead.
+- **Index name corrected:** `monit-logs-ss4o_avtools`, not the `otel-logs_avtools` name previously documented in this repo's comments.
+- Every shipped event now carries `service.name`, `deployment.environment`, and `k8s.namespace.name`, and uses the Event's own `message` field as the OTLP log body — filterable alongside application logs in the same index.
+- `values-qa.yaml` / `values-prod.yaml` each get their own `fluentBit.enabled` switch (default `false`) so QA and PROD can be turned on independently.
+
 ## [0.3.0] — 2026-07-28
 
 ### Changed
