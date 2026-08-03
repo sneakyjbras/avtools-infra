@@ -18,7 +18,12 @@
 # tbag key mapping mirrors code/manifests/avtools.pp:
 #   qa   : database_url_qa, eam_qa_pwd, landb_qa_pwd
 #   prod : database_url,    eam_pwd,    landb_pwd
-#   both : monit_pwd, avtools_logs_pwd
+#   both : monit_pwd
+#
+# monit_pwd is shared by the metrics/CronJob path AND the Kubernetes Events
+# shipper (chart/templates/fluent-bit.yaml) — MonIT confirmed it's the same
+# OTLP endpoint and password. The old avtools_logs_pwd / AVTOOLS_LOGS_PWD
+# dedicated logs credential is retired; nothing else to bridge for it.
 #
 set -euo pipefail
 
@@ -40,8 +45,6 @@ db_url="$(read_key "$db_key")"
 monit_pwd="$(read_key monit_pwd)"
 eam_pwd="$(read_key "$eam_key")"
 landb_secret="$(read_key "$landb_key")"
-# Optional keys (don't fail if not yet provisioned).
-logs_pwd="$(read_key avtools_logs_pwd 2>/dev/null || true)"
 
 for pair in "DATABASE_URL:$db_url" "MONIT_PASSWORD:$monit_pwd" "MY_PASSWORD:$eam_pwd" "LANDB_CLIENT_SECRET:$landb_secret"; do # pragma: allowlist secret
   if [[ -z "${pair#*:}" ]]; then
@@ -56,7 +59,6 @@ args=(
   --from-literal=MY_PASSWORD="$eam_pwd"
   --from-literal=LANDB_CLIENT_SECRET="$landb_secret"
 )
-[[ -n "$logs_pwd" ]] && args+=(--from-literal=AVTOOLS_LOGS_PWD="$logs_pwd")
 # SENTRY_DSN is issued by IT-PW (not tbag); pass it in the environment to include it.
 [[ -n "${SENTRY_DSN:-}" ]] && args+=(--from-literal=SENTRY_DSN="$SENTRY_DSN")
 

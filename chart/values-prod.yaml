@@ -9,6 +9,11 @@ eam:
 landb:
   clientId: av-tools
 
+# Kubernetes Events -> MonIT OpenSearch (see chart/values.yaml `fluentBit`).
+# QA and PROD are enabled independently; flip this to true when ready.
+fluentBit:
+  enabled: false
+
 # Schedules just mirror the base chart's tiered stagger (see chart/values.yaml
 # `jobs:` comment for the full offset rationale).
 jobs:

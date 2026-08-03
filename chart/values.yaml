@@ -279,19 +279,54 @@ prometheusRule:
   freshnessMinutes: 10
 
 # ---------------------------------------------------------------------------
-# Fluent Bit log shipper → CERN MonIT OpenSearch (otel-logs_avtools).
-# Default OFF: the MonIT logs tenant/index is not provisioned yet
-# (see AVTOOLS-OPENSEARCH.md). Flip on once SNOW confirms the endpoint/mapping.
+# Fluent Bit Kubernetes Events shipper → CERN MonIT OpenSearch, index
+# monit-logs-ss4o_avtools (the older "otel-logs_avtools" name once documented
+# here was wrong). Ships this namespace's Event objects — pod deadline
+# kills, OOM kills, ImagePullBackOff, evictions, failed Jobs, ArgoCD syncs —
+# the "Infra" layer of the 3-layer alerting design. Application logs are a
+# SEPARATE pipeline: the avtools process exports its own structured logs
+# directly via OTLP, not through this shipper (see chart/templates/
+# fluent-bit.yaml header comment for why: stdout here is ANSI-coloured
+# console text, not JSON, and CERN's own cern-magnum-fluentd DaemonSet
+# already tails every node's /var/log/containers/*.log to central MonIT).
+#
+# One replica (Deployment, not DaemonSet): kubernetes_events reads the API
+# server, not per-node log files, so a single pod sees every event in the
+# namespace; a DaemonSet would ship each event once per node.
+#
+# Default OFF: flip fluentBit.enabled to true per environment in
+# values-qa.yaml / values-prod.yaml once ready — the transport itself
+# (endpoint/port/TLS/CA/credential below) is verified working.
 # ---------------------------------------------------------------------------
 fluentBit:
   enabled: false
   image: cr.fluentbit.io/fluent/fluent-bit:3.1.9
-  # OTLP/HTTP logs receiver (different port+protocol from the metrics :4316 gRPC).
+  # OTLP/HTTP logs receiver. :4319 is the only TLS-capable OTLP port
+  # (TLSv1.3 verified live); :4318 is the same endpoint in plaintext; the
+  # gRPC ports (4316/4317) support no TLS at all and return UNAVAILABLE for
+  # logs, so HTTP/4319 is the only viable transport here (unrelated to the
+  # metrics path's MONIT_OTLP_ENDPOINT above, which is gRPC/4316).
   logsEndpointHost: monit-otlp.cern.ch
   logsEndpointPort: "4319"
   logsUri: /v1/logs
   tenant: avtools
-  # Password comes from the Secret (key AVTOOLS_LOGS_PWD), never templated here.
+  # Credential is the SAME MONIT_PASSWORD the metrics/CronJob path already
+  # uses (MonIT confirmed: same OTLP endpoint, same password) — read from the
+  # existing avtools-secrets Secret. There is no separate logs credential.
+  #
+  # CA chain needed to verify monit-otlp.cern.ch: CERN Grid Certification
+  # Authority (intermediate) + CERN Root Certification Authority 2. Verified
+  # live: the root alone, and the Debian default trust store, both fail —
+  # the server doesn't send its own intermediate. Both certs are public CAs
+  # (safe to commit); bundled at chart/files/cern-chain.pem.
+  caBundle:
+    # Leave empty (default) to have the chart create+own a ConfigMap from the
+    # bundled file above. Set to an externally managed ConfigMap name instead
+    # to skip that and just mount the existing one (the chart then creates
+    # nothing).
+    configMapName: ""
+    key: ca.pem
+    mountPath: /etc/fluent-bit/certs
   resources:
     requests:
       cpu: 50m
